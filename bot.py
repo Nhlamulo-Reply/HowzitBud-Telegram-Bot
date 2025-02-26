@@ -4,8 +4,7 @@ from telegram.ext import CommandHandler, MessageHandler, filters, Application
 import hashlib
 import requests
 
-# Bot Token and Payment Info
-TOKEN = "YOUR_BOT_TOKEN"
+TOKEN = "7481918040:AAHxJjyaLFRgKV_5pLAEx6KItrazmTSwtpM"
 PAYFAST_MERCHANT_ID = "YOUR_MERCHANT_ID"
 PAYFAST_MERCHANT_KEY = "YOUR_MERCHANT_KEY"
 PAYFAST_URL = "https://www.payfast.co.za/eng/process"
@@ -13,18 +12,10 @@ RETURN_URL = "https://yourwebsite.com/success"
 CANCEL_URL = "https://yourwebsite.com/cancel"
 NOTIFY_URL = "https://yourwebsite.com/notify"
 
-# Sample Products and User Cart
-db_products = {
-    "1": {"name": "Product A", "price": 100.0},
-    "2": {"name": "Product B", "price": 200.0},
-}
-user_cart = {}
-users_logged_in = {}
-
-# Initialize the bot application
+# Initialize the Bot and Application
 application = Application.builder().token(TOKEN).build()
 
-# Main Menu Keyboard
+# Keyboard Buttons
 main_menu = ReplyKeyboardMarkup(
     keyboard=[
         [KeyboardButton(text="🛍 Menu"), KeyboardButton(text="🛒 View Cart")],
@@ -34,120 +25,52 @@ main_menu = ReplyKeyboardMarkup(
     resize_keyboard=True
 )
 
-# Payment Methods Keyboard
-payment_methods_menu = ReplyKeyboardMarkup(
-    keyboard=[
-        [KeyboardButton(text="💳 Pay with PayFast")],
-        [KeyboardButton(text="🔙 Back to Menu")]
-    ],
-    resize_keyboard=True
-)
-
+# Sample products and cart
+db_products = {
+    "1": {"name": "Product A", "price": 100.0},
+    "2": {"name": "Product B", "price": 200.0},
+}
+user_cart = {}
 
 # Command Handlers
-
 async def start(update, context):
-    user_id = update.message.from_user.id
-    if user_id not in users_logged_in:
-        # First-time user login
-        await update.message.reply_text("Welcome! Please enter your username to get started.")
-    else:
-        await update.message.reply_text(f"Hello, {users_logged_in[user_id]}! How can I assist you today?",
-                                        reply_markup=main_menu)
+    user_name = update.message.from_user.first_name
+    greeting_message = f"Hello {user_name}! Welcome to our store. Choose an option below to get started:"
+    await update.message.reply_text(greeting_message, reply_markup=main_menu)
 
-
-async def handle_username(update, context):
-    user_id = update.message.from_user.id
-    username = update.message.text.strip()
-    users_logged_in[user_id] = username  # Store username in session
-    await update.message.reply_text(f"Hello, {username}! You are now logged in. Choose an option:",
-                                    reply_markup=main_menu)
-
+async def show_instructions(update, context):
+    instructions = (
+        "To get started, select a product from the menu by typing the product number.\n"
+        "You can also view your cart, check out, or proceed with any other option.\n"
+        "Once you select a product, it will be added to your cart!"
+    )
+    await update.message.reply_text(instructions, reply_markup=main_menu)
 
 async def show_menu(update, context):
     product_list = "\n".join([f"{key}: {item['name']} - R{item['price']}" for key, item in db_products.items()])
-    await update.message.reply_text(
-        f"Available Products:\n{product_list}\n\nReply with the product number to add to the cart.")
-
+    await update.message.reply_text(f"Available Products:\n{product_list}\n\nReply with product number to add to cart.", reply_markup=main_menu)
 
 async def add_to_cart(update, context):
-    user_id = update.message.from_user.id
-    product_id = update.message.text.strip()
+    product_id = update.message.text
     if product_id in db_products:
-        user_cart[user_id] = user_cart.get(user_id, []) + [db_products[product_id]]
-        await update.message.reply_text(f"Successfully added {db_products[product_id]['name']} to your cart!")
+        user_cart[update.message.from_user.id] = user_cart.get(update.message.from_user.id, []) + [db_products[product_id]]
+        await update.message.reply_text(f"Success! {db_products[product_id]['name']} has been added to your cart. You can add more products or proceed to checkout.", reply_markup=main_menu)
     else:
-        await update.message.reply_text("Invalid product ID. Please try again.")
-    await update.message.reply_text("Choose an action:", reply_markup=main_menu)
-
-
-async def remove_from_cart(update, context):
-    user_id = update.message.from_user.id
-    cart_items = user_cart.get(user_id, [])
-    if not cart_items:
-        await update.message.reply_text("Your cart is empty. Nothing to remove.")
-        return
-
-    # Display current cart and ask user to select which item to remove
-    cart_details = "\n".join(
-        [f"{index + 1}: {item['name']} - R{item['price']}" for index, item in enumerate(cart_items)])
-    await update.message.reply_text(
-        f"Your Cart:\n{cart_details}\n\nReply with the number of the product to remove from cart.")
-
-    # Save the user’s next step to remove item
-    context.user_data['removal_stage'] = True
-
-
-async def handle_removal(update, context):
-    if 'removal_stage' not in context.user_data or not context.user_data['removal_stage']:
-        return
-
-    user_id = update.message.from_user.id
-    product_id = int(update.message.text.strip()) - 1  # Subtracting 1 to match cart index
-    cart_items = user_cart.get(user_id, [])
-
-    if product_id >= len(cart_items) or product_id < 0:
-        await update.message.reply_text("Invalid selection. Please select a valid product number to remove.")
-    else:
-        removed_product = cart_items.pop(product_id)
-        user_cart[user_id] = cart_items  # Update cart
-        await update.message.reply_text(f"Successfully removed {removed_product['name']} from your cart.")
-
-    await update.message.reply_text("Choose an action:", reply_markup=main_menu)
-    context.user_data['removal_stage'] = False  # End the removal stage
-
+        await update.message.reply_text("Invalid product ID. Please try again.", reply_markup=main_menu)
 
 async def view_cart(update, context):
-    user_id = update.message.from_user.id
-    cart_items = user_cart.get(user_id, [])
+    cart_items = user_cart.get(update.message.from_user.id, [])
     if not cart_items:
-        await update.message.reply_text("Your cart is empty.")
+        await update.message.reply_text("Your cart is empty. Add products to your cart before proceeding.", reply_markup=main_menu)
         return
-
     cart_details = "\n".join([f"{item['name']} - R{item['price']}" for item in cart_items])
     total_price = sum(item['price'] for item in cart_items)
-    await update.message.reply_text(
-        f"Your Cart:\n{cart_details}\n\nTotal: R{total_price}\n\nTo remove an item, type its number.\nTo proceed to checkout, type 'Checkout'.")
-
-
-async def proceed_checkout(update, context):
-    user_id = update.message.from_user.id
-    cart_items = user_cart.get(user_id, [])
-    if not cart_items:
-        await update.message.reply_text("Your cart is empty. Please add items before proceeding.")
-        return
-
-    total_price = sum(item['price'] for item in cart_items)
-    await update.message.reply_text(f"Proceeding to checkout. Total price: R{total_price}. Choose a payment method:",
-                                    reply_markup=payment_methods_menu)
-
+    await update.message.reply_text(f"Your Cart:\n{cart_details}\n\nTotal: R{total_price}", reply_markup=main_menu)
 
 async def pay_now(update, context):
-    user_id = update.message.from_user.id
-    cart_items = user_cart.get(user_id, [])
+    cart_items = user_cart.get(update.message.from_user.id, [])
     if not cart_items:
-        await update.message.reply_text(
-            "Your cart is empty. Please add items to the cart before proceeding to payment.")
+        await update.message.reply_text("Your cart is empty. Add items before proceeding to payment.", reply_markup=main_menu)
         return
     total_price = sum(item['price'] for item in cart_items)
     payment_data = {
@@ -162,44 +85,31 @@ async def pay_now(update, context):
     query_string = "&".join([f"{key}={value}" for key, value in payment_data.items()])
     secure_hash = hashlib.md5(query_string.encode()).hexdigest()
     payment_link = f"{PAYFAST_URL}?{query_string}&signature={secure_hash}"
-    await update.message.reply_text(f"Click here to complete your payment:\n{payment_link}")
-
+    await update.message.reply_text(f"Click the link below to complete your payment:\n{payment_link}", reply_markup=main_menu)
 
 async def about(update, context):
-    await update.message.reply_text(
-        "This is an e-commerce bot. You can browse products, add them to the cart, and proceed to checkout!")
-
+    await update.message.reply_text("This is an e-commerce bot. Buy products easily! Browse the menu to get started.", reply_markup=main_menu)
 
 async def help_command(update, context):
-    await update.message.reply_text(
-        "Use the menu options to navigate through the bot, place orders, and make payments.")
-
+    await update.message.reply_text("Use the menu to navigate and place orders. You can add items to your cart and proceed to checkout.", reply_markup=main_menu)
 
 async def support(update, context):
-    await update.message.reply_text("Contact support at support@example.com for any assistance.")
-
+    await update.message.reply_text("Contact us at support@example.com. We're here to help!", reply_markup=main_menu)
 
 # Add Handlers to Dispatcher
 application.add_handler(CommandHandler("start", start))
-application.add_handler(
-    MessageHandler(filters.TEXT & filters.Regex(r"^\S+$"), handle_username))  # Handles username input for login
 application.add_handler(MessageHandler(filters.TEXT & filters.Regex("🛍 Menu"), show_menu))
-application.add_handler(
-    MessageHandler(filters.TEXT & filters.Regex(r"^\d+$"), add_to_cart))  # Only digits for product ID
+application.add_handler(MessageHandler(filters.TEXT & filters.Regex("❓ Help"), help_command))
 application.add_handler(MessageHandler(filters.TEXT & filters.Regex("🛒 View Cart"), view_cart))
 application.add_handler(MessageHandler(filters.TEXT & filters.Regex("💳 Pay Now"), pay_now))
-application.add_handler(MessageHandler(filters.TEXT & filters.Regex("📦 Orders"), view_cart))
-application.add_handler(MessageHandler(filters.TEXT & filters.Regex("❓ Help"), help_command))
 application.add_handler(MessageHandler(filters.TEXT & filters.Regex("ℹ About"), about))
 application.add_handler(MessageHandler(filters.TEXT & filters.Regex("📞 Support"), support))
-application.add_handler(MessageHandler(filters.TEXT & filters.Regex("Checkout"), proceed_checkout))  # Checkout handler
-application.add_handler(
-    MessageHandler(filters.TEXT & filters.Regex("🔙 Back to Menu"), show_menu))  # Back to menu handler
-application.add_handler(
-    MessageHandler(filters.TEXT & filters.Regex("🛒 Remove"), remove_from_cart))  # Remove item from cart
-application.add_handler(MessageHandler(filters.TEXT & filters.Regex(r"^\d+$"), handle_removal))  # Handle item removal
+application.add_handler(MessageHandler(filters.TEXT & filters.Regex(r"^\d+$"), add_to_cart))  # Only digits (product selection)
 
-# Start the bot
-if __name__ == "__main__":
+# Start the Bot
+def run_bot():
     logging.basicConfig(level=logging.INFO)
     application.run_polling()
+
+if __name__ == "__main__":
+    run_bot()
