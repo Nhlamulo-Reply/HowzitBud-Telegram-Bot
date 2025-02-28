@@ -1,5 +1,5 @@
 import logging
-from telegram import Update, ReplyKeyboardMarkup, KeyboardButton
+from telegram import Update, ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardButton
 from telegram.ext import Application, CommandHandler, MessageHandler, filters
 import paypalrestsdk
 import hashlib
@@ -50,9 +50,9 @@ main_menu = ReplyKeyboardMarkup(
 # Payment Methods Keyboard
 payment_methods_menu = ReplyKeyboardMarkup(
     keyboard=[
-        [KeyboardButton(text="💳 Pay with PayFast")],
-        [KeyboardButton(text="💳 Pay with PayPal")],
-        [KeyboardButton(text="🔙 Back to Menu")]
+        [InlineKeyboardButton(text="💳 Pay with BitCoin")],
+        [InlineKeyboardButton(text="💳 Pay with PayPal")],
+        [InlineKeyboardButton(text="🔙 Back to Menu")]
     ],
     resize_keyboard=True
 )
@@ -187,6 +187,25 @@ async def pay_with_paypal(update: Update, context):
     else:
         await update.message.reply_text("Sorry, there was an error generating the payment link.")
 
+
+# Back to Menu
+async def back_to_menu(update: Update, context):
+    await update.message.reply_text("Back to the main menu.", reply_markup=main_menu)
+
+# About Section
+async def about(update: Update, context):
+    await update.message.reply_text("This is the about section of our e-commerce platform.", reply_markup=main_menu)
+
+# Help Section
+async def help(update: Update, context):
+    await update.message.reply_text("Here is some help information for using the bot.", reply_markup=main_menu)
+
+# Support Section
+async def support(update: Update, context):
+    await update.message.reply_text("For support, contact us at support@ourplatform.com.", reply_markup=main_menu)
+
+
+
 # Add Handlers to the application
 application.add_handler(CommandHandler("start", start))
 application.add_handler(MessageHandler(filters.TEXT & filters.Regex("🛍 Menu"), show_menu))
@@ -197,6 +216,12 @@ application.add_handler(MessageHandler(filters.TEXT & filters.Regex("💳 Pay wi
 application.add_handler(MessageHandler(filters.TEXT & filters.Regex("💳 Pay with PayPal"), pay_with_paypal))
 application.add_handler(MessageHandler(filters.TEXT & filters.Regex("📦 Orders"), view_cart))
 application.add_handler(MessageHandler(filters.TEXT & filters.Regex("Checkout"), proceed_checkout))
+# Add Handlers to the application
+application.add_handler(MessageHandler(filters.TEXT & filters.Regex("🔙 Back to Menu"), back_to_menu))
+application.add_handler(MessageHandler(filters.TEXT & filters.Regex("ℹ About"), about))
+application.add_handler(MessageHandler(filters.TEXT & filters.Regex("❓ Help"), help))
+application.add_handler(MessageHandler(filters.TEXT & filters.Regex("📞 Support"), support))
+
 
 if __name__ == "__main__":
     application.run_polling()
