@@ -21,7 +21,7 @@ CANCEL_URL = "https://yourwebsite.com/cancel"  # Replace with your actual URL
 NOTIFY_URL = "https://yourwebsite.com/notify"  # Replace with your actual URL
 
 paypalrestsdk.configure({
-    "mode": "sandbox",  # Set to "live" for production
+    "mode": "sandbox",  # Set to "live" for productionn
     "client_id": "AQnqnmgRYjSp3ntW6ftVb72_DAW3W8IFM_u5ffg4RSJQa47DyXTWAqyt5m0BhUEx_vIfOi2iW003RMzS",
     "client_secret": "EDfxrULGQtOqRATgfPY9nezN4hPCwASvMFg7MwvsuzIdjRbyN9lOSdhTgMF4Hn6JkyeMSZzcYiiQ5Yrz"
 })
