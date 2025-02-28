@@ -169,6 +169,7 @@ async def pay_with_payfast(update: Update, context):
     payment_link = f"{PAYFAST_URL}?{query_string}&signature={secure_hash}"
     await update.message.reply_text(f"Click here to complete your payment:\n{payment_link}")
 
+
 # Pay with PayPal
 async def pay_with_paypal(update: Update, context):
     user_id = update.message.from_user.id
