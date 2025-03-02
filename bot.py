@@ -141,26 +141,47 @@ async def skip_discount(update: Update, context):
 async def pay_now(update: Update, context):
     user_id = update.message.from_user.id
     context.user_data["user_id"] = user_id
-    await update.message.reply_text("Do you have an affiliate code? If yes, please enter it now (or type 'skip' to proceed without a code):")
+    await update.message.reply_text("Do you have an affiliate code? (Type 'yes' to enter a code or 'no' to skip):")
     return AFFILIATE_CODE
 
 async def handle_affiliate_code(update: Update, context):
     user_id = context.user_data["user_id"]
-    affiliate_code = update.message.text.strip().lower()
+    user_response = update.message.text.strip().lower()
 
-    if affiliate_code == "skip":
+    if user_response == "yes":
+        await update.message.reply_text("Please enter your affiliate code:")
+        return AFFILIATE_CODE
+    elif user_response == "no":
         await update.message.reply_text("No affiliate code applied. Proceeding to payment.")
+        await show_payment_methods(update, context)
+        return PAYMENT_METHOD
     else:
+        # Handle invalid input
+        await update.message.reply_text("Invalid input. Please type 'yes' or 'no'.")
+        return AFFILIATE_CODE
+
+async def apply_affiliate_code(update: Update, context):
+    user_id = context.user_data["user_id"]
+    affiliate_code = update.message.text.strip()
+
+    # Validate the affiliate code (you can add your own validation logic here)
+    if len(affiliate_code) > 0:  # Example: Check if the code is not empty
         user_affiliate_codes[user_id] = affiliate_code
         await update.message.reply_text(f"Affiliate code '{affiliate_code}' applied. You will receive a 10% discount!")
+    else:
+        await update.message.reply_text("Invalid affiliate code. Please try again.")
+        return AFFILIATE_CODE
 
+    await show_payment_methods(update, context)
+    return PAYMENT_METHOD
+
+async def show_payment_methods(update: Update, context):
     await update.message.reply_text("Select a payment method:", reply_markup=InlineKeyboardMarkup([
         [InlineKeyboardButton("💳 Pay with PayPal", callback_data="pay_paypal")],
         [InlineKeyboardButton("₿ Pay with Bitcoin", callback_data="pay_bitcoin")],
         [InlineKeyboardButton("💳 Pay with FNB Card", callback_data="pay_fnb")],
         [InlineKeyboardButton("🔙 Back to Menu", callback_data="back_to_menu")]
     ]))
-    return PAYMENT_METHOD
 
 async def handle_payment(update: Update, context):
     query = update.callback_query
@@ -235,7 +256,10 @@ async def back_to_categories(update: Update, context):
 payment_conv_handler = ConversationHandler(
     entry_points=[MessageHandler(filters.TEXT & filters.Regex("💳 Pay Now"), pay_now)],
     states={
-        AFFILIATE_CODE: [MessageHandler(filters.TEXT, handle_affiliate_code)],
+        AFFILIATE_CODE: [
+            MessageHandler(filters.TEXT & ~filters.COMMAND, handle_affiliate_code),
+            MessageHandler(filters.TEXT & ~filters.COMMAND, apply_affiliate_code),
+        ],
         PAYMENT_METHOD: [CallbackQueryHandler(handle_payment, pattern="pay_.*")]
     },
     fallbacks=[]
@@ -252,10 +276,10 @@ application.add_handler(MessageHandler(filters.TEXT & filters.Regex("ℹ About")
 application.add_handler(MessageHandler(filters.TEXT & filters.Regex("❓ Help"), help))
 application.add_handler(MessageHandler(filters.TEXT & filters.Regex("📞 Support"), support))
 application.add_handler(CallbackQueryHandler(category_selected, pattern="category_.*"))
-application.add_handler(CallbackQueryHandler(product_selected, pattern="product_.*"))
-application.add_handler(CallbackQueryHandler(product_navigation, pattern="(next|back)_.*"))
-application.add_handler(CallbackQueryHandler(back_to_menu, pattern="back_to_menu"))
-application.add_handler(CallbackQueryHandler(back_to_categories, pattern="back_to_categories"))
+application.add_handler(CallbackQueryHandler(product_selected, pattern="product_.*",))
+application.add_handler(CallbackQueryHandler(product_navigation, pattern="(next|back)_.*", ))
+application.add_handler(CallbackQueryHandler(back_to_menu, pattern="back_to_menu",))
+application.add_handler(CallbackQueryHandler(back_to_categories, pattern="back_to_categories",))
 application.add_handler(payment_conv_handler)
 
 if __name__ == "__main__":
