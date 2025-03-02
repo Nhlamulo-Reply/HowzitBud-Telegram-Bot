@@ -251,7 +251,7 @@ async def handle_payment(update: Update, context):
     elif query.data == "pay_fnb":
         await query.message.reply_text("Please use the following FNB account details for payment:\n\n"
                                        "Bank: FNB\n"
-                                       "Account Number: 1234567890\n"
+                                       "Account Number: 63086573681\n"
                                        "Branch Code: 250655\n"
                                        "Reference: Your Order Number")
     elif query.data == "back_to_menu":
