@@ -1,6 +1,6 @@
 import logging
 from telegram import Update, ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardMarkup, InlineKeyboardButton
-from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, filters
+from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, filters, ConversationHandler
 import paypalrestsdk
 import uuid
 
@@ -9,13 +9,13 @@ logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s
 logger = logging.getLogger(__name__)
 
 # Bot Token
-TOKEN = ""
+TOKEN = "7481918040:AAHxJjyaLFRgKV_5pLAEx6KItrazmTSwtpM"
 
 # PayPal Configuration
 paypalrestsdk.configure({
     "mode": "sandbox",  # Change to "live" for production
-    "client_id": "",
-    "client_secret":""
+    "client_id": "AQnqnmgRYjSp3ntW6ftVb72_DAW3W8IFM_u5ffg4RSJQa47DyXTWAqyt5m0BhUEx_vIfOi2iW003RMzS",
+    "client_secret": "EDfxrULGQtOqRATgfPY9nezN4hPCwASvMFg7MwvsuzIdjRbyN9lOSdhTgMF4Hn6JkyeMSZzcYiiQ5Yrz"
 })
 
 # Product Categories & Items
@@ -30,6 +30,9 @@ user_cart = {}
 user_position = {}
 user_orders = {}
 user_affiliate_codes = {}
+
+# Conversation states
+AFFILIATE_CODE, PAYMENT_METHOD = range(2)
 
 def get_main_menu():
     return ReplyKeyboardMarkup(
@@ -132,21 +135,43 @@ async def remove_from_cart(update: Update, context):
     await view_cart(update, context)
 
 async def skip_discount(update: Update, context):
+    await update.message.reply_text("Skipping discount. Proceeding to payment.")
     await pay_now(update, context)
 
 async def pay_now(update: Update, context):
-    await update.message.reply_text("Proceeding to payment. Select a method:", reply_markup=InlineKeyboardMarkup([
+    user_id = update.message.from_user.id
+    context.user_data["user_id"] = user_id
+    await update.message.reply_text("Do you have an affiliate code? If yes, please enter it now (or type 'skip' to proceed without a code):")
+    return AFFILIATE_CODE
+
+async def handle_affiliate_code(update: Update, context):
+    user_id = context.user_data["user_id"]
+    affiliate_code = update.message.text.strip().lower()
+
+    if affiliate_code == "skip":
+        await update.message.reply_text("No affiliate code applied. Proceeding to payment.")
+    else:
+        user_affiliate_codes[user_id] = affiliate_code
+        await update.message.reply_text(f"Affiliate code '{affiliate_code}' applied. You will receive a 10% discount!")
+
+    await update.message.reply_text("Select a payment method:", reply_markup=InlineKeyboardMarkup([
         [InlineKeyboardButton("💳 Pay with PayPal", callback_data="pay_paypal")],
         [InlineKeyboardButton("₿ Pay with Bitcoin", callback_data="pay_bitcoin")],
         [InlineKeyboardButton("💳 Pay with FNB Card", callback_data="pay_fnb")],
         [InlineKeyboardButton("🔙 Back to Menu", callback_data="back_to_menu")]
     ]))
+    return PAYMENT_METHOD
 
 async def handle_payment(update: Update, context):
     query = update.callback_query
-    user_id = query.from_user.id
+    user_id = context.user_data["user_id"]
     cart_items = user_cart.get(user_id, [])
     total_amount = sum(item['price'] for item in cart_items)
+
+    # Apply 10% discount if affiliate code is present
+    if user_id in user_affiliate_codes:
+        total_amount *= 0.9
+        await query.message.reply_text(f"10% discount applied! New total: R{total_amount:.2f}")
 
     if query.data == "pay_paypal":
         payment = paypalrestsdk.Payment({
@@ -157,7 +182,7 @@ async def handle_payment(update: Update, context):
                 "cancel_url": "https://example.com/cancel"
             },
             "transactions": [{
-                "amount": {"total": f"{total_amount}", "currency": "USD"},
+                "amount": {"total": f"{total_amount:.2f}", "currency": "USD"},
                 "description": "Purchase from Telegram Bot"
             }]
         })
@@ -172,7 +197,7 @@ async def handle_payment(update: Update, context):
             await query.message.reply_text("Payment creation failed. Please try again.")
     elif query.data == "pay_bitcoin":
         bitcoin_address = "1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa"  # Replace with your Bitcoin address
-        await query.message.reply_text(f"Please send R{total_amount} to the following Bitcoin address: {bitcoin_address}")
+        await query.message.reply_text(f"Please send R{total_amount:.2f} to the following Bitcoin address: {bitcoin_address}")
     elif query.data == "pay_fnb":
         await query.message.reply_text("Please use the following FNB account details for payment:\n\n"
                                        "Bank: FNB\n"
@@ -186,6 +211,8 @@ async def handle_payment(update: Update, context):
     order_number = str(uuid.uuid4())[:8]
     user_orders[user_id] = order_number
     await query.message.reply_text(f"Your order number is: {order_number}")
+
+    return ConversationHandler.END
 
 async def about(update: Update, context):
     await update.message.reply_text("This is a sample Telegram bot for an online store.")
@@ -204,11 +231,15 @@ async def back_to_categories(update: Update, context):
     query = update.callback_query
     await query.message.reply_text("Select a category:", reply_markup=get_category_buttons())
 
-async def handle_affiliate_code(update: Update, context):
-    user_id = update.message.from_user.id
-    affiliate_code = update.message.text.strip()
-    user_affiliate_codes[user_id] = affiliate_code
-    await update.message.reply_text(f"Affiliate code '{affiliate_code}' applied successfully!")
+# Conversation handler for payment flow
+payment_conv_handler = ConversationHandler(
+    entry_points=[MessageHandler(filters.TEXT & filters.Regex("💳 Pay Now"), pay_now)],
+    states={
+        AFFILIATE_CODE: [MessageHandler(filters.TEXT, handle_affiliate_code)],
+        PAYMENT_METHOD: [CallbackQueryHandler(handle_payment, pattern="pay_.*")]
+    },
+    fallbacks=[]
+)
 
 # Add Handlers
 application = Application.builder().token(TOKEN).build()
@@ -220,13 +251,12 @@ application.add_handler(MessageHandler(filters.TEXT & filters.Regex(r"^\d+$"), r
 application.add_handler(MessageHandler(filters.TEXT & filters.Regex("ℹ About"), about))
 application.add_handler(MessageHandler(filters.TEXT & filters.Regex("❓ Help"), help))
 application.add_handler(MessageHandler(filters.TEXT & filters.Regex("📞 Support"), support))
-application.add_handler(MessageHandler(filters.TEXT & filters.Regex(r"^AFF\d+$"), handle_affiliate_code))  # Affiliate code handler
 application.add_handler(CallbackQueryHandler(category_selected, pattern="category_.*"))
 application.add_handler(CallbackQueryHandler(product_selected, pattern="product_.*"))
 application.add_handler(CallbackQueryHandler(product_navigation, pattern="(next|back)_.*"))
-application.add_handler(CallbackQueryHandler(handle_payment, pattern="pay_.*"))
 application.add_handler(CallbackQueryHandler(back_to_menu, pattern="back_to_menu"))
 application.add_handler(CallbackQueryHandler(back_to_categories, pattern="back_to_categories"))
+application.add_handler(payment_conv_handler)
 
 if __name__ == "__main__":
     application.run_polling()
