@@ -13,7 +13,7 @@ logger = logging.getLogger(__name__)
 TOKEN = "7481918040:AAHxJjyaLFRgKV_5pLAEx6KItrazmTSwtpM"
 
 # Admin User ID (replace with your Telegram user ID)
-ADMIN_USER_ID = 6963023458 # Replace with your actual Telegram user ID
+ADMIN_USER_ID = 6963023458  # Replace with your actual Telegram user ID
 
 # PayPal Configuration
 paypalrestsdk.configure({
@@ -162,7 +162,7 @@ async def remove_from_cart(update: Update, context):
 
 async def skip_discount(update: Update, context):
     await update.message.reply_text("Skipping discount. Proceeding to payment.")
-    await pay_now(update, context)
+    await show_payment_methods(update, context)
 
 async def pay_now(update: Update, context):
     user_id = update.message.from_user.id
@@ -176,14 +176,14 @@ async def handle_affiliate_code(update: Update, context):
 
     if user_response == "yes":
         await update.message.reply_text("Please enter your affiliate code:")
-        return AFFILIATE_CODE
+        return "AFFILIATE_CODE_INPUT"  # Transition to a new state for affiliate code input
     elif user_response == "no":
         await update.message.reply_text("No affiliate code applied. Proceeding to payment.")
         await show_payment_methods(update, context)
-        return PAYMENT_METHOD
+        return PAYMENT_METHOD  # Transition to PAYMENT_METHOD state
     else:
         await update.message.reply_text("Invalid input. Please type 'yes' or 'no'.")
-        return AFFILIATE_CODE
+        return AFFILIATE_CODE  # Stay in AFFILIATE_CODE state
 
 async def apply_affiliate_code(update: Update, context):
     user_id = context.user_data["user_id"]
@@ -195,15 +195,14 @@ async def apply_affiliate_code(update: Update, context):
         if datetime.now() < expiry:
             user_affiliate_codes[user_id] = affiliate_code
             await update.message.reply_text(f"Affiliate code '{affiliate_code}' applied. You will receive a 10% discount!")
+            await show_payment_methods(update, context)
+            return PAYMENT_METHOD  # Transition to PAYMENT_METHOD state
         else:
             await update.message.reply_text("This affiliate code has expired.")
-            return AFFILIATE_CODE
+            return AFFILIATE_CODE  # Stay in AFFILIATE_CODE state
     else:
         await update.message.reply_text("Invalid affiliate code. Please try again.")
-        return AFFILIATE_CODE
-
-    await show_payment_methods(update, context)
-    return PAYMENT_METHOD
+        return AFFILIATE_CODE  # Stay in AFFILIATE_CODE state
 
 async def show_payment_methods(update: Update, context):
     await update.message.reply_text("Select a payment method:", reply_markup=InlineKeyboardMarkup([
@@ -212,7 +211,6 @@ async def show_payment_methods(update: Update, context):
         [InlineKeyboardButton("💳 Pay with FNB Card", callback_data="pay_fnb")],
         [InlineKeyboardButton("🔙 Back to Menu", callback_data="back_to_menu")]
     ]))
-
 
 async def handle_payment(update: Update, context):
     query = update.callback_query
@@ -281,6 +279,9 @@ payment_conv_handler = ConversationHandler(
         AFFILIATE_CODE: [
             MessageHandler(filters.TEXT & ~filters.COMMAND, handle_affiliate_code),
         ],
+        "AFFILIATE_CODE_INPUT": [
+            MessageHandler(filters.TEXT & ~filters.COMMAND, apply_affiliate_code),
+        ],
         PAYMENT_METHOD: [
             CallbackQueryHandler(handle_payment, pattern="pay_.*"),
         ],
@@ -289,25 +290,6 @@ payment_conv_handler = ConversationHandler(
         CommandHandler("cancel", cancel_payment),
     ],
 )
-
-# Cancel Payment
-
-async def about(update: Update, context):
-    await update.message.reply_text("This is a sample Telegram bot for an online store.")
-
-async def help(update: Update, context):
-    await update.message.reply_text("Help information: ...")
-
-async def support(update: Update, context):
-    await update.message.reply_text("Contact support at support@example.com.")
-
-async def back_to_menu(update: Update, context):
-    query = update.callback_query
-    await query.message.reply_text("Returning to main menu.", reply_markup=get_main_menu())
-
-async def back_to_categories(update: Update, context):
-    query = update.callback_query
-    await query.message.reply_text("Select a category:", reply_markup=get_category_buttons())
 
 # Admin Commands
 async def add_product(update: Update, context):
@@ -384,6 +366,51 @@ async def handle_check_affiliate_code(update: Update, context):
         await update.message.reply_text(f"Affiliate code '{code}' not found.")
     return ConversationHandler.END
 
+async def view_affiliate_codes(update: Update, context):
+    if update.message.from_user.id != ADMIN_USER_ID:
+        await update.message.reply_text("You are not authorized to perform this action.")
+        return
+    if not affiliate_codes:
+        await update.message.reply_text("No affiliate codes found.")
+        return
+    codes_text = "\n".join([f"Code: {code}, Expiry: {data['expiry'].strftime('%Y-%m-%d %H:%M:%S')}" for code, data in affiliate_codes.items()])
+    await update.message.reply_text(f"Affiliate Codes:\n{codes_text}")
+
+async def view_user_orders(update: Update, context):
+    if update.message.from_user.id != ADMIN_USER_ID:
+        await update.message.reply_text("You are not authorized to perform this action.")
+        return
+    if not user_orders:
+        await update.message.reply_text("No orders found.")
+        return
+    orders_text = "\n".join([f"User ID: {user_id}, Order Number: {order_number}" for user_id, order_number in user_orders.items()])
+    await update.message.reply_text(f"User Orders:\n{orders_text}")
+
+async def view_user_carts(update: Update, context):
+    if update.message.from_user.id != ADMIN_USER_ID:
+        await update.message.reply_text("You are not authorized to perform this action.")
+        return
+    if not user_cart:
+        await update.message.reply_text("No carts found.")
+        return
+    carts_text = "\n".join([f"User ID: {user_id}, Cart: {cart}" for user_id, cart in user_cart.items()])
+    await update.message.reply_text(f"User Carts:\n{carts_text}")
+
+# Missing Functions
+async def back_to_menu(update: Update, context):
+    query = update.callback_query
+    await query.message.reply_text("Returning to main menu.", reply_markup=get_main_menu())
+
+async def back_to_categories(update: Update, context):
+    query = update.callback_query
+    await query.message.reply_text("Select a category:", reply_markup=get_category_buttons())
+
+async def about(update: Update, context):
+    await update.message.reply_text("This is a sample Telegram bot for an online store.")
+
+async def support(update: Update, context):
+    await update.message.reply_text("Contact support at support@example.com.")
+
 # Conversation handler for admin commands
 admin_conv_handler = ConversationHandler(
     entry_points=[
@@ -400,9 +427,13 @@ admin_conv_handler = ConversationHandler(
     },
     fallbacks=[]
 )
-
-# Add Handlers
+#Add Handlers
 application = Application.builder().token(TOKEN).build()
+
+# Admin Conversation Handler (MUST COME BEFORE OTHER HANDLERS)
+application.add_handler(admin_conv_handler)
+
+# Other Handlers
 application.add_handler(CommandHandler("start", start))
 application.add_handler(MessageHandler(filters.TEXT & filters.Regex("🛍 Menu"), show_menu))
 application.add_handler(MessageHandler(filters.TEXT & filters.Regex("Skip"), skip_discount))
@@ -415,13 +446,13 @@ application.add_handler(CallbackQueryHandler(product_selected, pattern="product_
 application.add_handler(CallbackQueryHandler(product_navigation, pattern="(next|back)_.*"))
 application.add_handler(CallbackQueryHandler(back_to_menu, pattern="back_to_menu"))
 application.add_handler(CallbackQueryHandler(back_to_categories, pattern="back_to_categories"))
+
+# Payment Conversation Handler (MUST COME AFTER ADMIN COMMANDS)
 application.add_handler(payment_conv_handler)
 
-# Admin Commands (MUST COME BEFORE THE CART REMOVAL HANDLER)
-application.add_handler(admin_conv_handler)
-
 # Cart Removal Handler (MUST COME AFTER ADMIN COMMANDS)
-application.add_handler(MessageHandler(filters.TEXT & filters.Regex(r"^\d+$"), remove_from_cart))
+application.add_handler(MessageHandler(filters.TEXT & filters.Regex(r"^\d+$") & ~filters.COMMAND, remove_from_cart))
 
+# Start the bot
 if __name__ == "__main__":
     application.run_polling()
