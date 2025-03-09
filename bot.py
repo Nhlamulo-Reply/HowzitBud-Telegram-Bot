@@ -237,7 +237,7 @@ async def handle_payment(update: Update, context):
                 "cancel_url": "https://example.com/cancel"
             },
             "transactions": [{
-                "amount": {"total": f"{total_amount:.2f}", "currency": "ZAR"},
+                "amount": {"total": f"{total_amount:.2f}", "currency": "USD"},
                 "description": "Purchase from Telegram Bot"
             }]
         })
