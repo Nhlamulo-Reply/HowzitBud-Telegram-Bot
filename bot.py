@@ -34,16 +34,16 @@ db_categories = {
 user_cart = {}
 user_position = {}
 user_orders = {}
-user_Discount_codes = {}
+user_AFFILIATE_codes = {}
 
-# Discount Codes Storage
-Discount_codes = {}  # Format: {"code": {"expiry": datetime, "discount": 0.1}}
+# AFFILIATE Codes Storage
+AFFILIATE_codes = {}  # Format: {"code": {"expiry": datetime, "AFFILIATE": 0.1}}
 
 # Delivery Fee
 DELIVERY_FEE = 100  # Default delivery fee of R100
 
 # Conversation states
-Discount_CODE, PAYMENT_METHOD, ADD_PRODUCT, REMOVE_PRODUCT, GENERATE_CODE = range(5)
+AFFILIATE_CODE, PAYMENT_METHOD, ADD_PRODUCT, REMOVE_PRODUCT, GENERATE_CODE = range(5)
 
 def get_main_menu():
     return ReplyKeyboardMarkup(
@@ -170,7 +170,8 @@ async def remove_from_cart(update: Update, context):
 #Address conversation
 
 # Define conversation states
-FULL_NAME, PHONE, ADDRESS, CITY, COUNTRY, CONFIRM = range(6)
+FULL_NAME, PHONE, ADDRESS, CITY, COUNTRY, CONFIRM, AFFILIATE_CODE = range(7)
+
 
 async def start_shipping(update: Update, context: CallbackContext):
     """Start collecting the user's shipping details."""
@@ -224,7 +225,6 @@ async def country(update: Update, context: CallbackContext):
     await update.message.reply_text(user_info)
     return CONFIRM
 
-
 async def confirm(update: Update, context: CallbackContext):
     """Save the shipping details if the user confirms and redirect to payment."""
     user_id = update.message.from_user.id
@@ -235,17 +235,63 @@ async def confirm(update: Update, context: CallbackContext):
             "full_name": context.user_data["full_name"],
             "phone": context.user_data["phone"],
             "address": context.user_data["address"],
+            "city": context.user_data["city"],
+            "country": context.user_data["country"],
         }
 
-        await update.message.reply_text("✅ Your shipping details have been saved!\n\n💳 Now you can proceed to payment.")
+        await update.message.reply_text(
+            "✅ Your shipping details have been saved!\n\n"
+            "💳 Now you can proceed to payment."
+        )
 
-        # Automatically trigger "💳 Pay Now"
-        await pay_now(update, context)
+        # Now proceed to handle affiliate code
+        await update.message.reply_text("Do you have a discount code? (Type 'yes' to enter a code or 'no' to skip):")
+        return AFFILIATE_CODE  # Transition to affiliate code state
 
-        return Discount_CODE  # Move user into the payment flow
     else:
         await update.message.reply_text("❌ Shipping details discarded. Start again with /shipping.")
         return ConversationHandler.END
+
+async def skip_AFFILIATE(update: Update, context):
+    await update.message.reply_text("Skipping AFFILIATE. Proceeding to payment.")
+    await show_payment_methods(update, context)
+
+async def pay_now(update: Update, context: CallbackContext):
+    user_id = update.message.from_user.id
+
+    # Ensure user_id is stored in context.user_data
+    context.user_data["user_id"] = user_id
+
+    # Check if the user has already provided an address
+    if user_id not in user_orders or "address" not in user_orders[user_id]:
+        await update.message.reply_text(
+            "🚚 Please enter your shipping address before proceeding to payment. Use /shipping to provide your details.")
+        return
+
+    await update.message.reply_text("Do you have an AFFILIATE code? (Type 'yes' to enter a code or 'no' to skip):")
+    return AFFILIATE_CODE
+
+#User's AFFILIATE code
+async def handle_AFFILIATE_code(update: Update, context: CallbackContext):
+    # Ensure user_id is present in context.user_data
+    user_id = context.user_data.get("user_id")
+
+    if not user_id:
+        await update.message.reply_text("Error: User ID not found. Please try again.")
+        return ConversationHandler.END
+
+    user_response = update.message.text.strip().lower()
+
+    if user_response == "yes":
+        await update.message.reply_text("Please enter your AFFILIATE code:")
+        return "AFFILIATE_CODE_INPUT"
+    elif user_response == "no":
+        await update.message.reply_text("No AFFILIATE code applied. Proceeding to payment.")
+        await show_payment_methods(update, context)
+        return PAYMENT_METHOD
+    else:
+        await update.message.reply_text("Invalid input. Please type 'yes' or 'no'.")
+        return AFFILIATE_CODE
 
 
 # Define the ConversationHandler
@@ -258,84 +304,54 @@ shipping_conversation = ConversationHandler(
         CITY: [MessageHandler(filters.TEXT & ~filters.COMMAND, city)],
         COUNTRY: [MessageHandler(filters.TEXT & ~filters.COMMAND, country)],
         CONFIRM: [MessageHandler(filters.TEXT & ~filters.COMMAND, confirm)],
+        AFFILIATE_CODE: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_AFFILIATE_code)],
     },
     fallbacks=[],
 )
 
 
-
-
-async def skip_discount(update: Update, context):
-    await update.message.reply_text("Skipping discount. Proceeding to payment.")
-    await show_payment_methods(update, context)
-
-
-async def pay_now(update: Update, context):
-    user_id = update.message.from_user.id
-
-    # Check if the user has already provided an address
-    if user_id not in user_orders or "address" not in user_orders[user_id]:
-        await update.message.reply_text(
-            "🚚 Please enter your shipping address before proceeding to payment. Use /shipping to provide your details.")
-        return
-
-    context.user_data["user_id"] = user_id
-    await update.message.reply_text("Do you have an Discount code? (Type 'yes' to enter a code or 'no' to skip):")
-    return Discount_CODE
-
-#User's discount code 
-async def handle_Discount_code(update: Update, context):
+async def apply_AFFILIATE_code(update: Update, context):
     user_id = context.user_data["user_id"]
-    user_response = update.message.text.strip().lower()
+    AFFILIATE_code = update.message.text.strip()
 
-    if user_response == "yes":
-        await update.message.reply_text("Please enter your Discount code:")
-        return "Discount_CODE_INPUT"
-    elif user_response == "no":
-        await update.message.reply_text("No Discount code applied. Proceeding to payment.")
-        await show_payment_methods(update, context)
-        return PAYMENT_METHOD
-    else:
-        await update.message.reply_text("Invalid input. Please type 'yes' or 'no'.")
-        return Discount_CODE
-
-async def apply_Discount_code(update: Update, context):
-    user_id = context.user_data["user_id"]
-    Discount_code = update.message.text.strip()
-
-    # Validate the Discount code
-    if Discount_code in Discount_codes:
-        expiry = Discount_codes[Discount_code]["expiry"]
+    # Validate the AFFILIATE code
+    if AFFILIATE_code in AFFILIATE_codes:
+        expiry = AFFILIATE_codes[AFFILIATE_code]["expiry"]
         if datetime.now() < expiry:
-            user_Discount_codes[user_id] = Discount_code
-            await update.message.reply_text(f"Discount code '{Discount_code}' applied. You will receive a 10% discount!")
+            user_AFFILIATE_codes[user_id] = AFFILIATE_code
+            await update.message.reply_text(f"AFFILIATE code '{AFFILIATE_code}' applied. You will receive a 10% AFFILIATE!")
             await show_payment_methods(update, context)
             return PAYMENT_METHOD  # Transition to PAYMENT_METHOD state
         else:
-            await update.message.reply_text("This Discount code has expired.")
-            return Discount_CODE  # Stay in Discount_CODE state
+            await update.message.reply_text("This AFFILIATE code has expired.")
+            return AFFILIATE_CODE  # Stay in AFFILIATE_CODE state
     else:
-        await update.message.reply_text("Invalid Discount code. Please try again.")
-        return Discount_CODE  # Stay in Discount_CODE state
+        await update.message.reply_text("Invalid AFFILIATE code. Please try again.")
+        return AFFILIATE_CODE  # Stay in AFFILIATE_CODE state
 
 async def show_payment_methods(update: Update, context):
-    await update.message.reply_text("Select a payment method:", reply_markup=InlineKeyboardMarkup([
-        [InlineKeyboardButton("💳 Pay with PayPal", callback_data="pay_paypal")],
-        [InlineKeyboardButton("₿ Pay with Bitcoin", callback_data="pay_bitcoin")],
-        [InlineKeyboardButton("💳 Pay with FNB Card", callback_data="pay_fnb")],
-        [InlineKeyboardButton("🔙 Back to Menu", callback_data="back_to_menu")]
-    ]))
+    await update.message.reply_text(
+        "Select a payment method:",
+        reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("💳 Pay with PayPal", callback_data="pay_paypal")],
+            [InlineKeyboardButton("₿ Pay with Bitcoin", callback_data="pay_bitcoin")],
+            [InlineKeyboardButton("💳 Pay with FNB Card", callback_data="pay_fnb")],
+            [InlineKeyboardButton("🔙 Back to Menu", callback_data="back_to_menu")]
+        ])
+    )
 
-async def handle_payment(update: Update, context):
+
+# Ensure your payment methods are correctly handled
+async def handle_payment(update: Update, context: CallbackContext):
     query = update.callback_query
     user_id = context.user_data["user_id"]
     cart_items = user_cart.get(user_id, [])
     total_amount = sum(item['price'] for item in cart_items) + DELIVERY_FEE  # Include delivery fee
 
-    # Apply 10% discount if Discount code is present
-    if user_id in user_Discount_codes:
+    # Apply 10% AFFILIATE if AFFILIATE code is present
+    if user_id in user_AFFILIATE_codes:
         total_amount *= 0.9
-        await query.message.reply_text(f"10% discount applied! New total: R{total_amount:.2f}")
+        await query.message.reply_text(f"10% AFFILIATE applied! New total: R{total_amount:.2f}")
 
     if query.data == "pay_paypal":
         payment = paypalrestsdk.Payment({
@@ -382,28 +398,30 @@ async def handle_payment(update: Update, context):
 
     return ConversationHandler.END
 
+
+
 async def cancel_payment(update: Update, context):
     await update.message.reply_text("Payment process canceled. Returning to the main menu.", reply_markup=get_main_menu())
     return ConversationHandler.END
 
-# Payment Conversation Handler
+
+
 payment_conv_handler = ConversationHandler(
     entry_points=[MessageHandler(filters.TEXT & filters.Regex("💳 Pay Now"), pay_now)],
     states={
-        Discount_CODE: [
-            MessageHandler(filters.TEXT & ~filters.COMMAND, handle_Discount_code),
+        AFFILIATE_CODE: [
+            MessageHandler(filters.TEXT & ~filters.COMMAND, handle_AFFILIATE_code),
         ],
-        "Discount_CODE_INPUT": [
-            MessageHandler(filters.TEXT & ~filters.COMMAND, apply_Discount_code),
+        "AFFILIATE_CODE_INPUT": [
+            MessageHandler(filters.TEXT & ~filters.COMMAND, apply_AFFILIATE_code),
         ],
         PAYMENT_METHOD: [
-            CallbackQueryHandler(handle_payment, pattern="pay_.*"),
+            CallbackQueryHandler(handle_payment, pattern="pay_.*"),  # This should catch all pay_* data
         ],
     },
-    fallbacks=[
-        CommandHandler("cancel", cancel_payment),
-    ],
+    fallbacks=[CommandHandler("cancel", cancel_payment)],
 )
+
 
 # Admin Commands
 async def add_product(update: Update, context):
@@ -443,52 +461,52 @@ async def handle_remove_product(update: Update, context):
     await update.message.reply_text(f"Product '{product_name}' not found.")
     return ConversationHandler.END
 
-async def generate_Discount_code(update: Update, context):
+async def generate_AFFILIATE_code(update: Update, context):
     if update.message.from_user.id != ADMIN_USER_ID:
         await update.message.reply_text("You are not authorized to perform this action.")
         return
-    await update.message.reply_text("Please enter the expiry period for the Discount code (in days):")
+    await update.message.reply_text("Please enter the expiry period for the AFFILIATE code (in days):")
     return GENERATE_CODE
 
-async def handle_generate_Discount_code(update: Update, context):
+async def handle_generate_AFFILIATE_code(update: Update, context):
     try:
         expiry_days = int(update.message.text.strip())
         expiry_date = datetime.now() + timedelta(days=expiry_days)
         code = str(uuid.uuid4())[:8]
-        Discount_codes[code] = {"expiry": expiry_date, "discount": 0.1}
-        await update.message.reply_text(f"Discount code generated: {code}\nExpiry: {expiry_date.strftime('%Y-%m-%d %H:%M:%S')}")
+        AFFILIATE_codes[code] = {"expiry": expiry_date, "AFFILIATE": 0.1}
+        await update.message.reply_text(f"AFFILIATE code generated: {code}\nExpiry: {expiry_date.strftime('%Y-%m-%d %H:%M:%S')}")
     except Exception as e:
-        await update.message.reply_text(f"Error generating Discount code: {e}")
+        await update.message.reply_text(f"Error generating AFFILIATE code: {e}")
     return ConversationHandler.END
 
-async def check_Discount_code(update: Update, context):
+async def check_AFFILIATE_code(update: Update, context):
     if update.message.from_user.id != ADMIN_USER_ID:
         await update.message.reply_text("You are not authorized to perform this action.")
         return
-    await update.message.reply_text("Please enter the Discount code to check:")
-    return Discount_CODE
+    await update.message.reply_text("Please enter the AFFILIATE code to check:")
+    return AFFILIATE_CODE
 
-async def handle_check_Discount_code(update: Update, context):
+async def handle_check_AFFILIATE_code(update: Update, context):
     code = update.message.text.strip()
-    if code in Discount_codes:
-        expiry = Discount_codes[code]["expiry"]
+    if code in AFFILIATE_codes:
+        expiry = AFFILIATE_codes[code]["expiry"]
         if datetime.now() < expiry:
-            await update.message.reply_text(f"Discount code '{code}' is valid until {expiry.strftime('%Y-%m-%d %H:%M:%S')}.")
+            await update.message.reply_text(f"AFFILIATE code '{code}' is valid until {expiry.strftime('%Y-%m-%d %H:%M:%S')}.")
         else:
-            await update.message.reply_text(f"Discount code '{code}' has expired.")
+            await update.message.reply_text(f"AFFILIATE code '{code}' has expired.")
     else:
-        await update.message.reply_text(f"Discount code '{code}' not found.")
+        await update.message.reply_text(f"AFFILIATE code '{code}' not found.")
     return ConversationHandler.END
 
-async def view_Discount_codes(update: Update, context):
+async def view_AFFILIATE_codes(update: Update, context):
     if update.message.from_user.id != ADMIN_USER_ID:
         await update.message.reply_text("You are not authorized to perform this action.")
         return
-    if not Discount_codes:
-        await update.message.reply_text("No Discount codes found.")
+    if not AFFILIATE_codes:
+        await update.message.reply_text("No AFFILIATE codes found.")
         return
-    codes_text = "\n".join([f"Code: {code}, Expiry: {data['expiry'].strftime('%Y-%m-%d %H:%M:%S')}" for code, data in Discount_codes.items()])
-    await update.message.reply_text(f"Discount Codes:\n{codes_text}")
+    codes_text = "\n".join([f"Code: {code}, Expiry: {data['expiry'].strftime('%Y-%m-%d %H:%M:%S')}" for code, data in AFFILIATE_codes.items()])
+    await update.message.reply_text(f"AFFILIATE Codes:\n{codes_text}")
 
 async def view_user_orders(update: Update, context):
     if update.message.from_user.id != ADMIN_USER_ID:
@@ -530,14 +548,14 @@ admin_conv_handler = ConversationHandler(
     entry_points=[
         CommandHandler("addproduct", add_product),
         CommandHandler("removeproduct", remove_product),
-        CommandHandler("generatecode", generate_Discount_code),
-        CommandHandler("checkcode", check_Discount_code),
+        CommandHandler("generatecode", generate_AFFILIATE_code),
+        CommandHandler("checkcode", check_AFFILIATE_code),
     ],
     states={
         ADD_PRODUCT: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_add_product)],
         REMOVE_PRODUCT: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_remove_product)],
-        GENERATE_CODE: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_generate_Discount_code)],
-        Discount_CODE: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_check_Discount_code)],
+        GENERATE_CODE: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_generate_AFFILIATE_code)],
+        AFFILIATE_CODE: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_check_AFFILIATE_code)],
     },
     fallbacks=[]
 )
@@ -551,7 +569,7 @@ application.add_handler(admin_conv_handler)
 application.add_handler(MessageHandler(filters.TEXT & filters.Regex("^▶ Start$"), handle_start_button))
 
 application.add_handler(MessageHandler(filters.TEXT & filters.Regex("🛍 Menu"), show_menu))
-application.add_handler(MessageHandler(filters.TEXT & filters.Regex("Skip"), skip_discount))
+application.add_handler(MessageHandler(filters.TEXT & filters.Regex("Skip"), skip_AFFILIATE))
 application.add_handler(MessageHandler(filters.TEXT & filters.Regex("🛒 View Cart"), view_cart))
 application.add_handler(MessageHandler(filters.TEXT & filters.Regex("ℹ About"), about))
 application.add_handler(MessageHandler(filters.TEXT & filters.Regex("❓ Help"), help))
