@@ -87,7 +87,12 @@ def get_product_buttons(category_id, position=0):
     return InlineKeyboardMarkup(buttons)
 
 async def start(update: Update, context):
-    await update.message.reply_text("Welcome to our store!", reply_markup=get_main_menu())
+    keyboard = [[KeyboardButton("▶ Start")]]
+    reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
+    await update.message.reply_text("Welcome to our store! Click 'Start' to continue.", reply_markup=reply_markup)
+
+async def handle_start_button(update: Update, context):
+    await update.message.reply_text("Select an option:", reply_markup=get_main_menu())
 
 async def show_menu(update: Update, context):
     await update.message.reply_text("Select a category:", reply_markup=get_category_buttons())
@@ -176,14 +181,14 @@ async def handle_affiliate_code(update: Update, context):
 
     if user_response == "yes":
         await update.message.reply_text("Please enter your affiliate code:")
-        return "AFFILIATE_CODE_INPUT"  # Transition to a new state for affiliate code input
+        return "AFFILIATE_CODE_INPUT"
     elif user_response == "no":
         await update.message.reply_text("No affiliate code applied. Proceeding to payment.")
         await show_payment_methods(update, context)
-        return PAYMENT_METHOD  # Transition to PAYMENT_METHOD state
+        return PAYMENT_METHOD
     else:
         await update.message.reply_text("Invalid input. Please type 'yes' or 'no'.")
-        return AFFILIATE_CODE  # Stay in AFFILIATE_CODE state
+        return AFFILIATE_CODE
 
 async def apply_affiliate_code(update: Update, context):
     user_id = context.user_data["user_id"]
@@ -232,7 +237,7 @@ async def handle_payment(update: Update, context):
                 "cancel_url": "https://example.com/cancel"
             },
             "transactions": [{
-                "amount": {"total": f"{total_amount:.2f}", "currency": "USD"},
+                "amount": {"total": f"{total_amount:.2f}", "currency": "ZAR"},
                 "description": "Purchase from Telegram Bot"
             }]
         })
@@ -427,14 +432,15 @@ admin_conv_handler = ConversationHandler(
     },
     fallbacks=[]
 )
-#Add Handlers
+
 application = Application.builder().token(TOKEN).build()
 
 # Admin Conversation Handler (MUST COME BEFORE OTHER HANDLERS)
 application.add_handler(admin_conv_handler)
 
 # Other Handlers
-application.add_handler(CommandHandler("start", start))
+application.add_handler(MessageHandler(filters.TEXT & filters.Regex("^▶ Start$"), handle_start_button))
+
 application.add_handler(MessageHandler(filters.TEXT & filters.Regex("🛍 Menu"), show_menu))
 application.add_handler(MessageHandler(filters.TEXT & filters.Regex("Skip"), skip_discount))
 application.add_handler(MessageHandler(filters.TEXT & filters.Regex("🛒 View Cart"), view_cart))
