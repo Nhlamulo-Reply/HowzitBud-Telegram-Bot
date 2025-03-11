@@ -40,12 +40,13 @@ user_AFFILIATE_codes = {}
 
 # AFFILIATE Codes Storage
 AFFILIATE_codes = {}  # Format: {"code": {"expiry": datetime, "AFFILIATE": 0.1}}
-
+# Store first-time user information
+first_time_users ={}
 # Delivery Fee
 DELIVERY_FEE = 100  # Default delivery fee of R100
 
 # Conversation states
-AFFILIATE_CODE,AFFILIATE_CODE_INPUT, PAYMENT_METHOD, ADD_PRODUCT, REMOVE_PRODUCT, GENERATE_CODE = range(6)
+AFFILIATE_CODE,AFFILIATE_CODE_INPUT, PAYMENT_METHOD, ADD_PRODUCT, REMOVE_PRODUCT, GENERATE_CODE  = range(6)
 
 def get_main_menu():
     return ReplyKeyboardMarkup(
@@ -89,13 +90,58 @@ def get_product_buttons(category_id, position=0):
 
     return InlineKeyboardMarkup(buttons)
 
-async def start(update: Update, context):
-    keyboard = [[KeyboardButton("▶ Start")]]
-    reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
-    await update.message.reply_text("Welcome to our store! Click 'Start' to continue.", reply_markup=reply_markup)
+# Store first-time user information (optional)
+first_time_users = {}
 
-async def handle_start_button(update: Update, context):
-    await update.message.reply_text("Select an option:", reply_markup=get_main_menu())
+
+async def start(update: Update, context: CallbackContext):
+    user_id = update.message.from_user.id
+
+    context.user_data["user_id"] = user_id
+    # If the user is typing /start or clicking the Start button
+    if update.message.text == "/start":
+        # Send the welcome message and instructions
+        await update.message.reply_text(
+            "Welcome to our store! Here's how you can navigate:\n"
+            "1. Browse through our menu to view products.\n"
+            "2. Add items to your cart and proceed to checkout.\n"
+            "3. Pay via your preferred method (PayPal, PayFast, or Bitcoin).\n"
+            "Click 'Menu' to start shopping.",
+            reply_markup=get_main_menu()
+        )
+
+    # Mark the user as a first-time visitor if they haven't been marked already
+    if user_id not in first_time_users:
+        first_time_users[user_id] = True
+        # Show the Start button to first-time users
+        keyboard = [[KeyboardButton("▶ Start")]]
+        reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
+        await update.message.reply_text("Welcome to our store! Click 'Start' to continue.", reply_markup=reply_markup)
+    else:
+        # If the user is not a first-time user, just show the main menu
+        await update.message.reply_text("Select an option:", reply_markup=get_main_menu())
+
+# Handle the "Start" button
+async def handle_start_button(update: Update, context: CallbackContext):
+    user_id = update.message.from_user.id
+
+    # If the user is a first-time visitor, mark them as no longer a first-timer
+    if first_time_users.get(user_id, False):
+        first_time_users[user_id] = False  # Mark user as no longer a first-time visitor
+
+        # Send the welcome message and instructions
+        await update.message.reply_text(
+            "Welcome to our store! Here's how you can navigate:\n"
+            "1. Browse through our menu to view products.\n"
+            "2. Add items to your cart and proceed to checkout.\n"
+            "3. Pay via your preferred method (PayPal, PayFast, or Bitcoin).\n"
+            "Click 'Menu' to start shopping.",
+            reply_markup=get_main_menu()
+        )
+    else:
+        # If the user is not a first-time visitor, just show the main menu
+        await update.message.reply_text("Select an option:", reply_markup=get_main_menu())
+
 
 async def show_menu(update: Update, context):
     await update.message.reply_text("Select a category:", reply_markup=get_category_buttons())
@@ -187,7 +233,7 @@ async def remove_from_cart(update: Update, context):
 #Address conversation
 
 # Define conversation states
-FULL_NAME, PHONE, ADDRESS, CITY, COUNTRY, CONFIRM,PAYMENT_CONFIRMATION, AFFILIATE_CODE, NEXT_STEP = range(9)
+FULL_NAME, PHONE, ADDRESS, CITY, COUNTRY, CONFIRM,PAYMENT_CONFIRMATION, NEXT_STEP = range(8)
 
 
 async def start_shipping(update: Update, context: CallbackContext):
@@ -273,23 +319,49 @@ async def skip_AFFILIATE(update: Update, context):
     await update.message.reply_text("Skipping AFFILIATE. Proceeding to payment.")
     await show_payment_methods(update, context)
 
-async def pay_now(update: Update, context: CallbackContext):
-    user_id = update.message.from_user.id
-    context.user_data["user_id"] = user_id  # ✅ Ensure user_id is stored
 
-    # Ensure the user has provided shipping details
+async def pay_now(update: Update, context: CallbackContext):
+    # Check if user_id is set
+    user_id = context.user_data.get("user_id")
+
+    if not user_id:
+        # If not set, ask the user to register or start the process
+        await update.message.reply_text(
+            "It seems you haven't started your session yet. Please try again later or restart the process.")
+        return ConversationHandler.END  # Exit or restart the conversation flow
+
     user_data = user_orders.get(user_id, {})  # Get user data or empty dict
 
+    # Check if address and full name are set
     if not user_data.get("address") or not user_data.get("full_name"):
         await update.message.reply_text(
             "🚚 Please enter your shipping address before proceeding to payment.\n"
             "Use /shipping to provide your details.",
-            reply_markup= get_main_menu()  # ✅ Add main menu keyboard
+            reply_markup=get_main_menu()  # ✅ Add main menu keyboard
         )
         return ConversationHandler.END  # End the conversation if no shipping details
 
-    await update.message.reply_text("Do you have an AFFILIATE code? (Type 'yes' to enter a code or 'no' to skip):")
-    return AFFILIATE_CODE  # ✅ Correctly transition to affiliate code step
+    # # Ask the user if they have an AFFILIATE code
+    # await update.message.reply_text("Do you have an AFFILIATE code? (Type 'yes' to enter a code or 'no' to skip):")
+    # return AFFILIATE_CODE  # ✅ Correctly transition to affiliate code step
+
+    # If they don't have an affiliate code or after the affiliate code process, continue with the payment process
+    cart_items = user_cart.get(user_id, [])  # Get user's cart items
+    total_amount = sum(item['price'] for item in cart_items) + DELIVERY_FEE
+
+    # Send a message showing the total amount
+    await update.message.reply_text(f"Your total is: R{total_amount:.2f}\n\nSelect a payment method:")
+
+    # Send inline buttons for payment methods
+    keyboard = [
+        [InlineKeyboardButton("Pay with PayPal", callback_data="pay_paypal")],
+        [InlineKeyboardButton("Pay with Bitcoin", callback_data="pay_bitcoin")],
+        [InlineKeyboardButton("Pay with FNB", callback_data="pay_fnb")]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+
+    await update.message.reply_text("Select a payment method:", reply_markup=reply_markup)
+    return PAYMENT_METHOD
 
 
 #User's AFFILIATE code
@@ -307,7 +379,7 @@ async def handle_AFFILIATE_code(update: Update, context: CallbackContext):
         return AFFILIATE_CODE_INPUT  # ✅ Correctly transition to input state
 
     elif user_response == "no":
-        await update.message.reply_text("No discount code applied. Proceeding to payment.")
+
         await show_payment_methods(update, context)
         return PAYMENT_METHOD  # ✅ Ensure state transition
 
@@ -352,7 +424,7 @@ async def apply_AFFILIATE_code(update: Update, context):
         await update.message.reply_text("Invalid AFFILIATE code. Please try again.")
         return AFFILIATE_CODE  # Stay in AFFILIATE_CODE state
 
-async def show_payment_methods(update: Update, context):
+async def show_payment_methods(update: Update, context: CallbackContext):
     await update.message.reply_text(
         "Select a payment method:",
         reply_markup=InlineKeyboardMarkup([
@@ -362,8 +434,6 @@ async def show_payment_methods(update: Update, context):
             [InlineKeyboardButton("🔙 Back to Menu", callback_data="back_to_menu")]
         ])
     )
-
-
 
 # Ensure your payment methods are correctly handled
 async def handle_payment(update: Update, context: CallbackContext):
@@ -532,15 +602,19 @@ async def cancel_payment(update: Update, context: CallbackContext):
     await update.message.reply_text("Payment process canceled. Returning to the main menu.", reply_markup=get_main_menu())
     return ConversationHandler.END
 
-# Add handlers
+
+
+
+
+
 payment_conv_handler = ConversationHandler(
     entry_points=[MessageHandler(filters.TEXT & filters.Regex("💳 Pay Now"), pay_now)],
     states={
         AFFILIATE_CODE: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_AFFILIATE_code)],
         AFFILIATE_CODE_INPUT: [MessageHandler(filters.TEXT & ~filters.COMMAND, apply_AFFILIATE_code)],
-        PAYMENT_METHOD: [CallbackQueryHandler(handle_payment, pattern="pay_.*")],  # Correct pattern
+        PAYMENT_METHOD: [CallbackQueryHandler(handle_payment, pattern="pay_.*")],
         PAYMENT_CONFIRMATION: [MessageHandler(filters.TEXT & ~filters.COMMAND, payment_confirmation)],
-        NEXT_STEP: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_user_choice)]
+        NEXT_STEP: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_user_choice)],
     },
     fallbacks=[CommandHandler("cancel", cancel_payment)],
 )
@@ -690,7 +764,9 @@ application = Application.builder().token(TOKEN).build()
 application.add_handler(admin_conv_handler)
 
 # Other Handlers
+application.add_handler(CommandHandler("start", start))
 application.add_handler(MessageHandler(filters.TEXT & filters.Regex("^▶ Start$"), handle_start_button))
+
 
 application.add_handler(MessageHandler(filters.TEXT & filters.Regex("🛍 Menu"), show_menu))
 application.add_handler(MessageHandler(filters.TEXT & filters.Regex("Skip"), skip_AFFILIATE))
