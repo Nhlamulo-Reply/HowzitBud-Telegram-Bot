@@ -302,7 +302,7 @@ async def handle_discount_code(update: Update, context: CallbackContext):
         await update.message.reply_text("Please enter your AFFILIATE code:")
         return AFFILIATE_CODE_INPUT
     elif user_response == "no":
-        await update.message.reply_text("Please continue with payments by clicking the 'Pay Now' button.")
+        await update.message.reply_text("Please continue with payments by clicking the 'Pay Now' button.",  reply_markup=get_main_menu())
         return PAYMENT_METHOD
     else:
         await update.message.reply_text("Invalid input. Please type 'yes' or 'no'.")
