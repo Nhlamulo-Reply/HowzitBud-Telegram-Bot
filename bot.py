@@ -287,6 +287,8 @@ async def confirm(update: Update, context: CallbackContext):
     else:
         await update.message.reply_text("❌ Shipping details discarded. Start again with /shipping.")
         return ConversationHandler.END
+
+
 async def handle_discount_code(update: Update, context: CallbackContext):
     user_id = context.user_data.get("user_id")
 
@@ -422,6 +424,9 @@ async def handle_payment(update: Update, context):
     user_orders[user_id] = order_number
     await query.message.reply_text(f"Your order number is: {order_number}")
 
+    await query.message.reply_text("Once done, type 'Payment Completed' to confirm.")
+    context.user_data["awaiting_payment_confirmation"] = True
+    return PAYMENT_CONFIRMATION
     # Notify admin about the order
     admin_message = f"New Order:\nUser ID: {user_id}\nOrder Number: {order_number}\nTotal Amount: R{total_amount:.2f}"
     await context.bot.send_message(chat_id=ADMIN_USER_ID, text=admin_message)
@@ -450,7 +455,7 @@ async def payment_confirmation(update: Update, context: CallbackContext):
             user_orders[user_id] = order_number  # Store the order number
 
             # Notify the user
-            await update.message.reply_text(f"✅ Payment confirmed!\nYour order number is: {order_number}")
+            await update.message.reply_text(f"✅ Payment confirmed!")
 
             # Notify the admin
             admin_message = f"🛒 New Order:\n👤 User ID: {user_id}\n📦 Order Number: {order_number}"
