@@ -79,8 +79,6 @@ def get_product_buttons(category_id, position=0):
 
     for idx, (product, price) in enumerate(current_products):
         product_idx = idx + (current_chunk * chunk_size)
-        # Debugging: Print category_id and product_idx
-        print(f"category_id: {category_id}, product_idx: {product_idx}")
         buttons.append([
             InlineKeyboardButton(f"🛒 Add {product} - R{price}", callback_data=f"add_{category_id}_{product_idx}"),
             InlineKeyboardButton("➕ Set Quantity", callback_data=f"set_quantity_{category_id}_{product_idx}")
@@ -101,7 +99,6 @@ def get_product_buttons(category_id, position=0):
 
     return InlineKeyboardMarkup(buttons)
 
-
 async def set_quantity(update: Update, context: CallbackContext):
     query = update.callback_query
     callback_data = query.data
@@ -114,18 +111,13 @@ async def set_quantity(update: Update, context: CallbackContext):
         return
 
     context.user_data["selected_product"] = (category_id, product_idx)
-    print(context.user_data["selected_product"])
     context.user_data["awaiting_quantity"] = True  # Set flag
-    # Get the product name for the selected product
+
     category = db_categories.get(category_id, {})
     products = list(category.get("products", {}).items())
 
-
-
     if 0 <= product_idx < len(products):
         product_name, _ = products[product_idx]
-
-        # Prompt user to enter quantity for the selected product
         await query.answer()
         await query.message.reply_text(f"📝 Enter the number of quantity/products you want for {product_name}:")
 
@@ -141,26 +133,30 @@ async def enter_quantity(update: Update, context: CallbackContext):
 
     quantity = int(quantity)
     selected_product = context.user_data.get("selected_product")
-    print("Selected product : " ,selected_product)
     if not selected_product:
         await update.message.reply_text("❌ Something went wrong. Please try again.")
         return ConversationHandler.END
 
-    product_name, price = selected_product
+    category_id, product_idx = selected_product
+    category = db_categories.get(category_id, {})
+    products = list(category.get("products", {}).items())
 
-    # Ensure user_cart exists
-    if user_id not in user_cart:
-        user_cart[user_id] = []
+    if 0 <= product_idx < len(products):
+        product_name, price = products[product_idx]
 
-    # Find if product already exists in cart
-    existing_item = next((item for item in user_cart[user_id] if item["name"] == product_name), None)
+        if user_id not in user_cart:
+            user_cart[user_id] = []
 
-    if existing_item:
-        existing_item["quantity"] = quantity  # Update quantity instead of adding a duplicate
+        existing_item = next((item for item in user_cart[user_id] if item["name"] == product_name), None)
+
+        if existing_item:
+            existing_item["quantity"] += quantity  # Update quantity
+        else:
+            user_cart[user_id].append({"name": product_name, "price": price, "quantity": quantity})
+
+        await update.message.reply_text(f"✅ Set {quantity}x {product_name} in cart!")
     else:
-        user_cart[user_id].append({"name": product_name, "price": price, "quantity": quantity})
-
-    await update.message.reply_text(f"✅ Set {quantity}x {product_name} in cart!")
+        await update.message.reply_text("❌ Invalid product selection.")
 
     return ConversationHandler.END
 
@@ -277,7 +273,7 @@ async def product_selected(update: Update, context: CallbackContext):
             await query.message.edit_reply_markup(reply_markup=new_reply_markup)
     else:
         await query.answer("❌ Invalid product selection.")
-async def view_cart(update: Update, context):
+async def view_cart(update: Update, context: CallbackContext):
     user_id = update.message.from_user.id
     cart_items = user_cart.get(user_id, [])
 
@@ -288,60 +284,87 @@ async def view_cart(update: Update, context):
     cart_text = "🛒 *Your Cart:*\n"
     keyboard = []
 
-    # Loop through each item in the cart
     for idx, item in enumerate(cart_items, start=1):
         cart_text += f"{idx}. {item['quantity']}x {item['name']} - R{item['price'] * item['quantity']}\n"
-        # Add a remove button for each item
         keyboard.append([InlineKeyboardButton(f"🗑️ Remove {item['name']}", callback_data=f"remove_{idx-1}")])
 
-    # Add delivery fee and total cost to the cart message
     cart_text += "\n🚚 *Delivery Fee:* R100"
     cart_text += f"\n💰 *Total:* R{sum(i['price'] * i['quantity'] for i in cart_items) + 100}"
 
-    # Send the cart text and inline keyboard with buttons to remove items
     await update.message.reply_text(cart_text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+
+# Add conversation handler for setting quantity
+quantity_conversation_handler = ConversationHandler(
+    entry_points=[CallbackQueryHandler(set_quantity, pattern="^set_quantity_")],
+    states={
+        ENTER_QUANTITY: [MessageHandler(filters.TEXT & ~filters.COMMAND, enter_quantity)],
+    },
+    fallbacks=[],
+)
+
+
+
+REMOVE_PRODUCT, REMOVE_QUANTITY = range(2)  # Define states
 
 
 async def remove_item_callback(update: Update, context: CallbackContext):
+    """Ask the user which product they want to remove."""
     query = update.callback_query
     user_id = query.from_user.id
     cart_items = user_cart.get(user_id, [])
 
     if not cart_items:
         await query.answer("🛒 Your cart is empty.")
-        return
+        return ConversationHandler.END
 
-    # Extract the item index from callback data
-    try:
-        _, item_index = query.data.split("_")
-        item_index = int(item_index)
+    # Display cart items for selection
+    cart_text = "\n".join(
+        [f"{i + 1}. {item['quantity']}x {item['name']} - R{item['price']}" for i, item in enumerate(cart_items)])
 
-        if 0 <= item_index < len(cart_items):
-            selected_item = cart_items[item_index]
+    await query.message.edit_text(
+        f"🗑️ Select the product number to remove:\n{cart_text}\n\nSend the product number:"
+    )
 
-            # If more than one quantity, ask how many to remove
-            if selected_item["quantity"] > 1:
-                context.user_data["remove_item_index"] = item_index
-                await query.message.edit_text(
-                    f"📝 You have {selected_item['quantity']}x {selected_item['name']} in your cart.\n"
-                    "How many would you like to remove?",
-                )
-                return REMOVE_QUANTITY  # Move to next step in conversation
+    return REMOVE_PRODUCT  # Move to next step
 
-            # If only one, remove it immediately
-            removed_item = cart_items.pop(item_index)
-            await query.answer()
-            await query.message.edit_text(f"🗑️ Removed {removed_item['name']} (1x) from cart.")
 
-        else:
-            await query.answer("❌ Invalid item number.")
+async def remove_product(update: Update, context: CallbackContext):
+    """Process product selection and check quantity."""
+    user_id = update.message.from_user.id
+    cart_items = user_cart.get(user_id, [])
+    product_number_text = update.message.text.strip()
 
-    except ValueError:
-        await query.answer("❌ Error processing your request.")
+    if not product_number_text.isdigit():
+        await update.message.reply_text("❌ Please enter a valid product number.")
+        return REMOVE_PRODUCT  # Ask again
 
+    product_number = int(product_number_text) - 1  # Convert to index
+
+    if product_number < 0 or product_number >= len(cart_items):
+        await update.message.reply_text("❌ Invalid product number. Try again.")
+        return REMOVE_PRODUCT  # Ask again
+
+    selected_item = cart_items[product_number]
+    context.user_data["remove_item_index"] = product_number
+
+    # If more than 1 quantity, ask how many to remove
+    if selected_item["quantity"] > 1:
+        await update.message.reply_text(
+            f"📝 You have {selected_item['quantity']}x {selected_item['name']} in your cart.\n"
+            "How many would you like to remove?"
+        )
+        return REMOVE_QUANTITY  # Move to next step
+
+    # If only 1, remove immediately
+    removed_item = cart_items.pop(product_number)
+    await update.message.reply_text(f"🗑️ Removed {removed_item['name']} (1x) from cart.")
     await view_cart(update, context)
 
+    return ConversationHandler.END  # End conversation
+
+
 async def remove_quantity(update: Update, context: CallbackContext):
+    """Remove the specified quantity from the cart."""
     user_id = update.message.from_user.id
     cart_items = user_cart.get(user_id, [])
     item_index = context.user_data.get("remove_item_index")
@@ -369,15 +392,22 @@ async def remove_quantity(update: Update, context: CallbackContext):
         selected_item["quantity"] -= remove_qty
         await update.message.reply_text(f"🗑️ Removed {selected_item['name']} ({remove_qty}x) from cart.")
 
+    await view_cart(update, context)
     return ConversationHandler.END  # End conversation
 
 
+# Single "Remove" button in cart
+def get_cart_keyboard():
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("🗑️ Remove Item", callback_data="remove")],  # Only one button
+    ])
 
-REMOVE_QUANTITY = 1  # Define state
 
+# Add conversation handler
 conversation_handler = ConversationHandler(
-    entry_points=[CallbackQueryHandler(remove_item_callback, pattern="^remove_\d+$")],
+    entry_points=[CallbackQueryHandler(remove_item_callback, pattern="^remove$")],  # Single "Remove" button
     states={
+        REMOVE_PRODUCT: [MessageHandler(filters.TEXT & ~filters.COMMAND, remove_product)],
         REMOVE_QUANTITY: [MessageHandler(filters.TEXT & ~filters.COMMAND, remove_quantity)],
     },
     fallbacks=[],
