@@ -122,7 +122,6 @@ async def set_quantity(update: Update, context: CallbackContext):
         await query.message.reply_text(f"📝 Enter the number of quantity/products you want for {product_name}:")
 
     return ENTER_QUANTITY  # Move to quantity input step
-
 async def enter_quantity(update: Update, context: CallbackContext):
     user_id = update.message.from_user.id
     quantity = update.message.text.strip()
@@ -159,7 +158,6 @@ async def enter_quantity(update: Update, context: CallbackContext):
         await update.message.reply_text("❌ Invalid product selection.")
 
     return ConversationHandler.END
-
 async def update_quantity(update: Update, context: CallbackContext):
     user_id = update.message.from_user.id
     cart_items = user_cart.get(user_id, [])
@@ -178,6 +176,14 @@ async def update_quantity(update: Update, context: CallbackContext):
         await update.message.reply_text("❌ Please enter in the format: `ItemNumber NewQuantity`")
 
     await view_cart(update, context)
+# Add conversation handler for setting quantity
+quantity_conversation_handler = ConversationHandler(
+    entry_points=[CallbackQueryHandler(set_quantity, pattern="^set_quantity_")],
+    states={
+        ENTER_QUANTITY: [MessageHandler(filters.TEXT & ~filters.COMMAND, enter_quantity)],
+    },
+    fallbacks=[],
+)
 
 
 async def back_to_categories(update: Update, context: CallbackContext):
@@ -282,30 +288,20 @@ async def view_cart(update: Update, context: CallbackContext):
         return
 
     cart_text = "🛒 *Your Cart:*\n"
-    keyboard = []
-
     for idx, item in enumerate(cart_items, start=1):
         cart_text += f"{idx}. {item['quantity']}x {item['name']} - R{item['price'] * item['quantity']}\n"
-        keyboard.append([InlineKeyboardButton(f"🗑️ Remove {item['name']}", callback_data=f"remove_{idx-1}")])
 
     cart_text += "\n🚚 *Delivery Fee:* R100"
     cart_text += f"\n💰 *Total:* R{sum(i['price'] * i['quantity'] for i in cart_items) + 100}"
 
+    # Add a single "Remove Item" button
+    keyboard = [[InlineKeyboardButton("🗑️ Remove Item", callback_data="remove_item")]]
     await update.message.reply_text(cart_text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
 
-# Add conversation handler for setting quantity
-quantity_conversation_handler = ConversationHandler(
-    entry_points=[CallbackQueryHandler(set_quantity, pattern="^set_quantity_")],
-    states={
-        ENTER_QUANTITY: [MessageHandler(filters.TEXT & ~filters.COMMAND, enter_quantity)],
-    },
-    fallbacks=[],
-)
 
 
 
 REMOVE_PRODUCT, REMOVE_QUANTITY = range(2)  # Define states
-
 
 async def remove_item_callback(update: Update, context: CallbackContext):
     """Ask the user which product they want to remove."""
@@ -326,8 +322,6 @@ async def remove_item_callback(update: Update, context: CallbackContext):
     )
 
     return REMOVE_PRODUCT  # Move to next step
-
-
 async def remove_product(update: Update, context: CallbackContext):
     """Process product selection and check quantity."""
     user_id = update.message.from_user.id
@@ -361,8 +355,6 @@ async def remove_product(update: Update, context: CallbackContext):
     await view_cart(update, context)
 
     return ConversationHandler.END  # End conversation
-
-
 async def remove_quantity(update: Update, context: CallbackContext):
     """Remove the specified quantity from the cart."""
     user_id = update.message.from_user.id
@@ -395,17 +387,9 @@ async def remove_quantity(update: Update, context: CallbackContext):
     await view_cart(update, context)
     return ConversationHandler.END  # End conversation
 
-
-# Single "Remove" button in cart
-def get_cart_keyboard():
-    return InlineKeyboardMarkup([
-        [InlineKeyboardButton("🗑️ Remove Item", callback_data="remove")],  # Only one button
-    ])
-
-
-# Add conversation handler
-conversation_handler = ConversationHandler(
-    entry_points=[CallbackQueryHandler(remove_item_callback, pattern="^remove$")],  # Single "Remove" button
+# Add conversation handler for removing items
+remove_conversation_handler = ConversationHandler(
+    entry_points=[CallbackQueryHandler(remove_item_callback, pattern="^remove_item$")],
     states={
         REMOVE_PRODUCT: [MessageHandler(filters.TEXT & ~filters.COMMAND, remove_product)],
         REMOVE_QUANTITY: [MessageHandler(filters.TEXT & ~filters.COMMAND, remove_quantity)],
@@ -745,8 +729,6 @@ async def support(update: Update, context: CallbackContext):
 
 application = Application.builder().token(TOKEN).build()
 
-
-
 # Handlers
 application.add_handler(CommandHandler("start", start))
 application.add_handler(MessageHandler(filters.TEXT & filters.Regex("^▶ Start$"), handle_start_button))
@@ -766,8 +748,6 @@ application.add_handler(shipping_conversation)
 
 application.add_handler(MessageHandler(filters.TEXT & filters.Regex(r"^\d+\s+\d+$") & ~filters.COMMAND, update_quantity))
 
-
-
 # Create ConversationHandler for setting quantity
 quantity_conv_handler = ConversationHandler(
     entry_points=[CallbackQueryHandler(set_quantity, pattern=r"^set_quantity_\d+_\d+$")],
@@ -778,12 +758,8 @@ quantity_conv_handler = ConversationHandler(
 )
 
 application.add_handler(quantity_conv_handler)
-application.add_handler(conversation_handler)
-# application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, remove_from_cart))
+application.add_handler(remove_conversation_handler)
 application.add_handler(CallbackQueryHandler(remove_item_callback, pattern="^remove_\\d+$"))
-
-
-
 
 
 
