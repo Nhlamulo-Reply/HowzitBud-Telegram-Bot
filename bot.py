@@ -5,6 +5,8 @@ from telegram import Update, ReplyKeyboardMarkup, KeyboardButton, InlineKeyboard
 from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, filters, ConversationHandler, CallbackContext
 import paypalrestsdk
 import uuid
+import re
+
 from datetime import datetime
 
 # Logging setup
@@ -25,17 +27,13 @@ paypalrestsdk.configure({
 })
 
 # Product Categories & Items
-db_categories = {
-    "1": {"name": "GREENHOUSE", "products": {"Mimosa": 90, "White Truffle": 60, "Product3": 70, "Product4": 80, "Product5": 90, "Product6": 100, "Product7": 110, "Product8": 120}},
-    "2": {"name": "GREENDOOR", "products": {"Sunset Sherbet": 85, "Purple Punch": 70, "Product3": 75, "Product4": 85, "Product5": 95, "Product6": 105, "Product7": 115, "Product8": 125}},
-    "3": {"name": "TUNNEL AA", "products": {"Gelato": 95, "Wedding Cake": 80, "Product3": 85, "Product4": 95, "Product5": 105, "Product6": 115, "Product7": 125, "Product8": 135}},
-}
 
 # User Cart Storage
 user_cart = {}
 user_position = {}
 user_orders = {}
 user_AFFILIATE_codes = {}
+first_time_users ={}
 
 
 # AFFILIATE Codes Storage
@@ -43,16 +41,23 @@ AFFILIATE_codes = {}  # Format: {"code": {"expiry": datetime, "AFFILIATE": 0.1}}
 
 # Delivery Fee
 DELIVERY_FEE = 100  # Default delivery fee of R100
+ENTER_QUANTITY = 1
 
 # Conversation states
 FULL_NAME, PHONE, ADDRESS, CITY, COUNTRY, CONFIRM, DISCOUNT_CODE, PAYMENT_CONFIRMATION, NEXT_STEP = range(9)
 AFFILIATE_CODE, AFFILIATE_CODE_INPUT, PAYMENT_METHOD, ADD_PRODUCT, REMOVE_PRODUCT, GENERATE_CODE = range(6)
 
+db_categories = {
+    "1": {"name": "GREENHOUSE", "products": {"Mimosa": 90, "White Truffle": 60, "Product3": 70, "Product4": 80, "Product5": 90, "Product6": 100, "Product7": 110, "Product8": 120}},
+    "2": {"name": "GREENDOOR", "products": {"Sunset Sherbet": 85, "Purple Punch": 70, "Product3": 75, "Product4": 85, "Product5": 95, "Product6": 105, "Product7": 115, "Product8": 125}},
+    "3": {"name": "TUNNEL AA", "products": {"Gelato": 95, "Wedding Cake": 80, "Product3": 85, "Product4": 95, "Product5": 105, "Product6": 115, "Product7": 125, "Product8": 135}},
+}
+
 def get_main_menu():
     return ReplyKeyboardMarkup(
         keyboard=[
             [KeyboardButton("🛍 Menu"), KeyboardButton("🛒 View Cart")],
-            [KeyboardButton("💳 Pay Now"), KeyboardButton("Skip")],
+            [KeyboardButton("💳 Pay Now"), KeyboardButton("Track Order")],
             [KeyboardButton("ℹ About"), KeyboardButton("❓ Help"), KeyboardButton("📞 Support")]
         ], resize_keyboard=True
     )
@@ -64,6 +69,7 @@ def get_category_buttons():
     ]
     return InlineKeyboardMarkup(buttons)
 
+
 def get_product_buttons(category_id, position=0):
     category = db_categories.get(category_id, {})
     products = list(category.get("products", {}).items())
@@ -72,16 +78,24 @@ def get_product_buttons(category_id, position=0):
     current_chunk = position // chunk_size
     current_products = chunks[current_chunk]
 
-    buttons = [
-        [InlineKeyboardButton(f"{product} - R{price}", callback_data=f"product_{category_id}_{idx + (current_chunk * chunk_size)}")]
-        for idx, (product, price) in enumerate(current_products)
-    ]
+    buttons = []
+
+    for idx, (product, price) in enumerate(current_products):
+        product_idx = idx + (current_chunk * chunk_size)
+        # Debugging: Print category_id and product_idx
+        print(f"category_id: {category_id}, product_idx: {product_idx}")
+        buttons.append([
+            InlineKeyboardButton(f"🛒 Add {product} - R{price}", callback_data=f"add_{category_id}_{product_idx}"),
+            InlineKeyboardButton("➕ Set Quantity", callback_data=f"set_quantity_{category_id}_{product_idx}")
+        ])
 
     nav_buttons = []
     if current_chunk > 0:
-        nav_buttons.append(InlineKeyboardButton("⬅ Back", callback_data=f"back_{category_id}_{(current_chunk - 1) * chunk_size}"))
+        nav_buttons.append(
+            InlineKeyboardButton("⬅ Back", callback_data=f"back_{category_id}_{(current_chunk - 1) * chunk_size}"))
     if current_chunk < len(chunks) - 1:
-        nav_buttons.append(InlineKeyboardButton("Next ➡", callback_data=f"next_{category_id}_{(current_chunk + 1) * chunk_size}"))
+        nav_buttons.append(
+            InlineKeyboardButton("Next ➡", callback_data=f"next_{category_id}_{(current_chunk + 1) * chunk_size}"))
 
     if nav_buttons:
         buttons.append(nav_buttons)
@@ -90,6 +104,97 @@ def get_product_buttons(category_id, position=0):
 
     return InlineKeyboardMarkup(buttons)
 
+async def set_quantity(update: Update, context: CallbackContext):
+    query = update.callback_query
+    callback_data = query.data
+
+    try:
+        _, _, category_id, product_idx = callback_data.split("_")
+        product_idx = int(product_idx)
+    except ValueError:
+        await query.answer("❌ Invalid data format. Please try again.")
+        return
+
+    context.user_data["selected_product"] = (category_id, product_idx)
+    context.user_data["awaiting_quantity"] = True  # Set flag
+    # Get the product name for the selected product
+    category = db_categories.get(category_id, {})
+    products = list(category.get("products", {}).items())
+
+    if 0 <= product_idx < len(products):
+        product_name, _ = products[product_idx]
+
+        # Prompt user to enter quantity for the selected product
+        await query.answer()
+        await query.message.reply_text(f"📝 Enter the number of quantity/products you want for {product_name}:")
+
+    return ENTER_QUANTITY  # Move to quantity input step
+
+async def enter_quantity(update: Update, context: CallbackContext):
+    user_id = update.message.from_user.id
+    quantity_text = update.message.text.strip()
+
+    if not quantity_text.isdigit() or int(quantity_text) <= 0:
+        await update.message.reply_text("❌ Invalid quantity. Please enter a positive number:")
+        return ENTER_QUANTITY  # Stay in the same state
+
+    quantity = int(quantity_text)
+    category_id, product_idx = context.user_data.get("selected_product", (None, None))
+
+    if category_id is None or product_idx is None:
+        await update.message.reply_text("❌ Something went wrong. Please try again.")
+        return ConversationHandler.END
+
+    category = db_categories.get(category_id, {})
+    products = list(category.get("products", {}).items())
+
+    if 0 <= product_idx < len(products):
+        product_name, price = products[product_idx]
+
+        # Store in cart
+        if user_id not in user_cart:
+            user_cart[user_id] = []
+
+        user_cart[user_id].append({"name": product_name, "price": price, "quantity": quantity})
+        await update.message.reply_text(f"✅ Added {quantity}x {product_name} to cart!")
+    else:
+        await update.message.reply_text("❌ Invalid product selection.")
+
+    context.user_data["awaiting_quantity"] = False  # Reset flag
+    return ConversationHandler.END  # End the conversation
+
+    user_id = update.message.from_user.id
+    quantity = update.message.text.strip()
+
+    # Validate input
+    if not quantity.isdigit() or int(quantity) <= 0:
+        await update.message.reply_text("❌ Invalid quantity. Please enter a positive number:")
+        return ENTER_QUANTITY  # Stay in the same state
+
+    quantity = int(quantity)
+    category_id, product_idx = context.user_data.get("selected_product", (None, None))
+
+    if category_id is None or product_idx is None:
+        await update.message.reply_text("❌ Something went wrong. Please try again.")
+        return ConversationHandler.END
+
+    category = db_categories.get(category_id, {})
+    products = list(category.get("products", {}).items())
+
+    if 0 <= product_idx < len(products):
+        product_name, price = products[product_idx]
+
+        # Store in cart
+        if user_id not in user_cart:
+            user_cart[user_id] = []
+
+        user_cart[user_id].append({"name": product_name, "price": price, "quantity": quantity})
+
+        await update.message.reply_text(f"✅ Added {quantity}x {product_name} to cart!")
+    else:
+        await update.message.reply_text("❌ Invalid product selection.")
+
+    return ConversationHandler.END  # End the conversation
 async def back_to_categories(update: Update, context: CallbackContext):
     query = update.callback_query
     await query.answer()
@@ -115,7 +220,6 @@ async def product_navigation(update: Update, context: CallbackContext):
     except ValueError as e:
         logger.error(f"Error parsing callback data: {e}")
         await query.answer("An error occurred. Please try again.")
-
 async def start(update: Update, context: CallbackContext):
     user_id = update.message.from_user.id
     context.user_data["user_id"] = user_id
@@ -161,63 +265,118 @@ async def category_selected(update: Update, context):
 
 async def product_selected(update: Update, context: CallbackContext):
     query = update.callback_query
-    await query.answer()
+    _, category_id, product_idx = query.data.split("_")
+    product_idx = int(product_idx)
 
-    logger.info(f"Callback data received: {query.data}")
+    category = db_categories.get(category_id, {})
+    products = list(category.get("products", {}).items())
 
-    _, category_id, position = query.data.split("_")
-    position = int(position)
+    if 0 <= product_idx < len(products):
+        product_name, price = products[product_idx]
+        user_id = query.from_user.id
 
-    product_name, price = list(db_categories[category_id]["products"].items())[position]
+        if user_id not in user_cart:
+            user_cart[user_id] = []
 
-    user_id = query.from_user.id
-    if user_id not in user_cart:
-        user_cart[user_id] = []
-    user_cart[user_id].append({"name": product_name, "price": price})
+        # Default quantity to 1
+        user_cart[user_id].append({"name": product_name, "price": price, "quantity": 1})
 
-    await query.answer(f"{product_name} added to cart!")
+        await query.answer(f"✅ Added 1x {product_name} to cart!")
 
-    # Get new inline keyboard markup
-    new_reply_markup = get_product_buttons(category_id, position)
+        # Generate new reply markup
+        new_reply_markup = get_product_buttons(category_id, product_idx)
 
-    # Check if the reply markup has changed
-    current_markup = query.message.reply_markup
-    if current_markup != new_reply_markup:
-        try:
+        # Check if the new reply markup is different from the current one
+        if new_reply_markup != query.message.reply_markup:
             await query.message.edit_reply_markup(reply_markup=new_reply_markup)
-        except BadRequest as e:
-            if "Message is not modified" in str(e):
-                logger.info("Skipping edit: Message is already up-to-date.")
-            else:
-                raise  # Re-raise unexpected errors
     else:
-        logger.info("Skipping update: No changes in reply markup.")
-
+        await query.answer("❌ Invalid product selection.")
 
 async def view_cart(update: Update, context):
     user_id = update.message.from_user.id
     cart_items = user_cart.get(user_id, [])
+
     if not cart_items:
-        await update.message.reply_text("Your cart is empty.")
+        await update.message.reply_text("🛒 Your cart is empty.")
         return
-    cart_details = "\n".join([f"{idx + 1}. {item['name']} - R{item['price']}" for idx, item in enumerate(cart_items)])
-    total_amount = sum(item['price'] for item in cart_items) + DELIVERY_FEE
-    await update.message.reply_text(f"Your Cart:\n{cart_details}\n\nDelivery Fee: R{DELIVERY_FEE}\nTotal: R{total_amount}\n\nReply with the item number to remove it.",
-                                    reply_markup=get_main_menu())
+
+    cart_text = "🛒 *Your Cart:*\n"
+    keyboard = []
+
+    for idx, item in enumerate(cart_items, start=1):
+        cart_text += f"{idx}. {item['quantity']}x {item['name']} - R{item['price'] * item['quantity']}\n"
+        # Add a remove button for each item
+        keyboard.append([InlineKeyboardButton(f"🗑️ Remove {item['name']}", callback_data=f"remove_{idx-1}")])
+
+    cart_text += "\n🚚 *Delivery Fee:* R100"
+    cart_text += f"\n💰 *Total:* R{sum(i['price'] * i['quantity'] for i in cart_items) + 100}"
+
+
+
+    await update.message.reply_text(cart_text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+async def update_quantity(update: Update, context: CallbackContext):
+    user_id = update.message.from_user.id
+    cart_items = user_cart.get(user_id, [])
+
+    try:
+        item_index, new_quantity = update.message.text.strip().split()
+        item_index = int(item_index) - 1
+        new_quantity = int(new_quantity)
+
+        if 0 <= item_index < len(cart_items) and new_quantity > 0:
+            cart_items[item_index]["quantity"] = new_quantity
+            await update.message.reply_text(f"✅ Updated {cart_items[item_index]['name']} to {new_quantity}x")
+        else:
+            await update.message.reply_text("❌ Invalid item number or quantity.")
+    except ValueError:
+        await update.message.reply_text("❌ Please enter in the format: `ItemNumber NewQuantity`")
+
+    await view_cart(update, context)
 
 async def remove_from_cart(update: Update, context):
     user_id = update.message.from_user.id
     cart_items = user_cart.get(user_id, [])
+
+    # Prevent removal during quantity input
+    if context.user_data.get("awaiting_quantity", True):
+        await update.message.reply_text("⚠️ Please enter the quantity first before removing an item.")
+        return
+
     try:
         item_index = int(update.message.text.strip()) - 1
         if 0 <= item_index < len(cart_items):
             removed_item = cart_items.pop(item_index)
-            await update.message.reply_text(f"Removed {removed_item['name']} from cart.")
+            await update.message.reply_text(f"🗑️ Removed {removed_item['name']} from cart.")
         else:
-            await update.message.reply_text("Invalid item number.")
+            await update.message.reply_text("❌ Invalid item number.")
     except ValueError:
-        await update.message.reply_text("Please enter a valid number.")
+        await update.message.reply_text("❌ Please enter a valid number.")
+
     await view_cart(update, context)
+
+async def remove_item_callback(update: Update, context):
+    query = update.callback_query
+    user_id = query.from_user.id
+    cart_items = user_cart.get(user_id, [])
+
+    try:
+        _, item_index = query.data.split("_")
+        item_index = int(item_index)
+
+        if 0 <= item_index < len(cart_items):
+            removed_item = cart_items.pop(item_index)
+            await query.answer()
+            await query.message.edit_text(f"🗑️ Removed {removed_item['name']} from cart.")
+        else:
+            await query.answer("❌ Invalid item number.")
+
+    except ValueError:
+        await query.answer("❌ Error processing your request.")
+
+    await view_cart(update, context)
+
+
+
 
 async def start_shipping(update: Update, context: CallbackContext):
     await update.message.reply_text("Please enter your full name:")
@@ -538,6 +697,9 @@ payment_conv_handler = ConversationHandler(
     fallbacks=[CommandHandler("cancel", cancel_payment)],
 )
 
+
+
+
 # Add the payment conversation handler to the application
 
 async def help(update: Update, context: CallbackContext):
@@ -563,6 +725,8 @@ async def support(update: Update, context: CallbackContext):
 
 application = Application.builder().token(TOKEN).build()
 
+
+
 # Handlers
 application.add_handler(CommandHandler("start", start))
 application.add_handler(MessageHandler(filters.TEXT & filters.Regex("^▶ Start$"), handle_start_button))
@@ -574,12 +738,33 @@ application.add_handler(MessageHandler(filters.TEXT & filters.Regex("ℹ About")
 application.add_handler(MessageHandler(filters.TEXT & filters.Regex("❓ Help"), help))
 application.add_handler(MessageHandler(filters.TEXT & filters.Regex("📞 Support"), support))
 application.add_handler(CallbackQueryHandler(category_selected, pattern="category_.*"))
-application.add_handler(CallbackQueryHandler(product_selected, pattern="product_.*"))
+application.add_handler(CallbackQueryHandler(product_selected, pattern="add_.*"))
 application.add_handler(CallbackQueryHandler(product_navigation, pattern="(next|back)_.*"))
 application.add_handler(CallbackQueryHandler(back_to_menu, pattern="back_to_menu"))
 application.add_handler(CallbackQueryHandler(back_to_categories, pattern="back_to_categories"))
 application.add_handler(shipping_conversation)
-application.add_handler(MessageHandler(filters.TEXT & filters.Regex(r"^\d+$") & ~filters.COMMAND, remove_from_cart))
+application.add_handler(CallbackQueryHandler(set_quantity, pattern=r"^set_quantity_\d+_\d+$"))
+application.add_handler(MessageHandler(filters.TEXT & filters.Regex(r"^\d+\s+\d+$") & ~filters.COMMAND, update_quantity))
+
+
+
+# Create ConversationHandler for setting quantity
+conv_handler = ConversationHandler(
+    entry_points=[CallbackQueryHandler(set_quantity, pattern=r"^set_quantity_\d+_\d+$")],
+    states={
+        ENTER_QUANTITY: [MessageHandler(filters.TEXT & ~filters.COMMAND, enter_quantity)]
+    },
+    fallbacks=[]
+)
+
+application.add_handler(conv_handler)
+application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, remove_from_cart))  # Keep cart removal separate
+application.add_handler(CallbackQueryHandler(remove_item_callback, pattern=r"^remove_\d+$"))
+
+
+
+
+
 
 # Start the bot
 if __name__ == "__main__":
