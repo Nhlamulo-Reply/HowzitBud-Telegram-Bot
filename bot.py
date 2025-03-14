@@ -46,7 +46,7 @@ DELIVERY_FEE = 100  # Default delivery fee of R100
 ENTER_QUANTITY = 1
 # Conversation states
 (FULL_NAME, PHONE, ADDRESS, CITY, COUNTRY, CONFIRM, DISCOUNT_CODE, AFFILIATE_CODE_INPUT,
- PAYMENT_METHOD, PAYMENT_CONFIRMATION, NEXT_STEP, REMOVE_PRODUCT, REMOVE_QUANTITY) = range(13)
+ PAYMENT_METHOD, PAYMENT_CONFIRMATION, NEXT_STEP, REMOVE_PRODUCT, REMOVE_QUANTITY, CONFIRM_SHI) = range(13)
 
 db_categories = {
     "1": {"name": "GREENHOUSE", "products": {"Mimosa": 90, "White Truffle": 60, "Product3": 70, "Product4": 80, "Product5": 90, "Product6": 100, "Product7": 110, "Product8": 120}},
@@ -445,12 +445,15 @@ async def confirm_shipping(update: Update, context: CallbackContext):
 
         await update.message.reply_text("✅ Your shipping details have been saved!")
 
-        # Prompt the user to start the payment process
-        await update.message.reply_text(
-            "Click the '💳 Pay Now' button or type /pay to proceed with payment.",
-            reply_markup=get_main_menu()
-        )
-        return ConversationHandler.END  # End the shipping conversation
+        # Check if the cart is empty
+        cart_items = user_cart.get(user_id, [])
+        if not cart_items:
+            await update.message.reply_text("🛒 Your cart is empty. Add items to proceed to payment.", reply_markup=get_main_menu())
+            return ConversationHandler.END
+
+        # Ask if the user has a discount code
+        await update.message.reply_text("Do you have a discount code? (yes/no)")
+        return DISCOUNT_CODE  # Move to discount code step
     elif user_response == "no":
         await update.message.reply_text("Please re-enter your shipping details.")
         return FULL_NAME  # Restart the shipping process
@@ -462,9 +465,21 @@ async def cancel_shipping(update: Update, context: CallbackContext):
     await update.message.reply_text("Shipping process canceled. Returning to the main menu.", reply_markup=get_main_menu())
     return ConversationHandler.END
 
+
+
+
 # Payment conversation
 async def start_payment(update: Update, context: CallbackContext):
-    user_id = update.callback_query.from_user.id if update.callback_query else update.message.from_user.id
+    logger.info("start_payment triggered")
+
+    # Determine if the update is from a callback query or a message
+    if update.callback_query:
+        user_id = update.callback_query.from_user.id
+        logger.info("Triggered by inline keyboard button")
+    else:
+        user_id = update.message.from_user.id
+        logger.info("Triggered by reply keyboard button")
+
     context.user_data["user_id"] = user_id
 
     # Check if the cart is empty
@@ -495,11 +510,10 @@ async def start_payment(update: Update, context: CallbackContext):
 
     # Ask if the user has a discount code
     if update.callback_query:
-        await update.callback_query.message.reply_text("Do you have a discountsss code? (yes/no)")
+        await update.callback_query.message.reply_text("Do you have a discount code? (yes/no)")
     else:
         await update.message.reply_text("Do you have a discount code? (yes/no)")
     return DISCOUNT_CODE
-
 async def handle_discount_code(update: Update, context: CallbackContext):
     user_response = update.message.text.strip().lower()
 
@@ -540,11 +554,20 @@ async def show_payment_methods(update: Update, context: CallbackContext):
         [InlineKeyboardButton("🔙 Back to Menu", callback_data="back_to_menu")]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
-    await update.message.reply_text("Select a payment method:", reply_markup=reply_markup)
+
+    if update.callback_query:
+        await update.callback_query.message.reply_text("Select a payment method:", reply_markup=reply_markup)
+    else:
+        await update.message.reply_text("Select a payment method:", reply_markup=reply_markup)
+
     return PAYMENT_METHOD
 
 async def handle_payment(update: Update, context: CallbackContext):
     query = update.callback_query
+    await query.answer()  # Acknowledge the callback query to stop the loading animation
+
+    logger.info(f"handle_payment triggered with callback_data: {query.data}")
+
     user_id = query.from_user.id
     cart_items = user_cart.get(user_id, [])
     total_amount = sum(item['price'] * item['quantity'] for item in cart_items) + DELIVERY_FEE
@@ -555,16 +578,20 @@ async def handle_payment(update: Update, context: CallbackContext):
         await query.message.reply_text(f"10% discount applied! New total: R{total_amount:.2f}")
 
     if query.data == "pay_paypal":
+        logger.info("User selected PayPal payment method")
         await query.message.reply_text("Redirecting to PayPal... (Simulated)")
     elif query.data == "pay_bitcoin":
+        logger.info("User selected Bitcoin payment method")
         await query.message.reply_text(f"Please send R{total_amount:.2f} to the following Bitcoin address: 1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa")
     elif query.data == "pay_fnb":
+        logger.info("User selected FNB payment method")
         await query.message.reply_text("Please use the following FNB account details for payment:\n\n"
                                       "Bank: FNB\n"
                                       "Account Number: 63086573681\n"
                                       "Branch Code: 250655\n"
                                       "Reference: Your Order Number")
     elif query.data == "back_to_menu":
+        logger.info("User selected Back to Menu")
         await query.message.reply_text("Returning to main menu.", reply_markup=get_main_menu())
         return ConversationHandler.END
 
@@ -749,17 +776,21 @@ shipping_conversation = ConversationHandler(
 
 # Payment Conversation Handler
 payment_conv_handler = ConversationHandler(
-    entry_points=[CallbackQueryHandler(start_payment, pattern="^pay_now$")],
+    entry_points=[
+        CallbackQueryHandler(start_payment, pattern="^pay_now$"),  # For inline keyboard button
+        MessageHandler(filters.TEXT & filters.Regex("^💳 Pay Now$"), start_payment)  # For reply keyboard button
+    ],
     states={
         DISCOUNT_CODE: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_discount_code)],
         AFFILIATE_CODE_INPUT: [MessageHandler(filters.TEXT & ~filters.COMMAND, apply_AFFILIATE_code)],
-        PAYMENT_METHOD: [CallbackQueryHandler(handle_payment, pattern="^(pay_paypal|pay_bitcoin|pay_fnb|back_to_menu)$")],
+        PAYMENT_METHOD: [
+            CallbackQueryHandler(handle_payment, pattern="^(pay_paypal|pay_bitcoin|pay_fnb|back_to_menu)$")
+        ],
         PAYMENT_CONFIRMATION: [MessageHandler(filters.TEXT & ~filters.COMMAND, payment_confirmation)],
         NEXT_STEP: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_user_choice)],
     },
     fallbacks=[CommandHandler("cancel", cancel_payment)],
 )
-
 # Quantity Conversation Handler
 quantity_conv_handler = ConversationHandler(
     entry_points=[CallbackQueryHandler(set_quantity, pattern="^set_quantity_")],
@@ -811,7 +842,6 @@ application.add_handler(CommandHandler("pay", start_payment))
 application.add_handler(CallbackQueryHandler(back_to_categories, pattern="^back_to_categories$"))
 application.add_handler(CallbackQueryHandler(back_to_menu, pattern="^back_to_menu$"))
 application.add_handler(CallbackQueryHandler(product_navigation, pattern="^(next|back)_.*"))
-
 
 # Start the bot
 if __name__ == "__main__":
