@@ -46,7 +46,7 @@ DELIVERY_FEE = 100  # Default delivery fee of R100
 ENTER_QUANTITY = 1
 # Conversation states
 (FULL_NAME, PHONE, ADDRESS, CITY, COUNTRY, CONFIRM, DISCOUNT_CODE, AFFILIATE_CODE_INPUT,
- PAYMENT_METHOD, PAYMENT_CONFIRMATION, NEXT_STEP, REMOVE_PRODUCT, REMOVE_QUANTITY, CONFIRM_SHI) = range(13)
+ PAYMENT_METHOD, PAYMENT_CONFIRMATION, NEXT_STEP, REMOVE_PRODUCT, REMOVE_QUANTITY) = range(13)
 
 db_categories = {
     "1": {"name": "GREENHOUSE", "products": {"Mimosa": 90, "White Truffle": 60, "Product3": 70, "Product4": 80, "Product5": 90, "Product6": 100, "Product7": 110, "Product8": 120}},
@@ -118,9 +118,9 @@ async def start(update: Update, context: CallbackContext):
         "Welcome to our store! Here's how you can navigate:\n"
         "1. Browse through our menu to view products.\n"
         "2. Add items to your cart and proceed to checkout.\n"
-        "3. Pay via your preferred method (PayPal, Bitcoin, or FNB Card).\n"
+        "3. Pay via your preferred method (PayPal, Bitcoin, or Credit Card).\n"
         "4. Track your order after payment.\n"
-        "Click '▶ Start' to begin.",
+        "Click '▶ MENU' to begin.",
         reply_markup=get_start_menu()
     )
 
@@ -205,7 +205,7 @@ async def view_cart(update: Update, context: CallbackContext):
 
     # Add "Pay Now" and "Remove Item" buttons
     keyboard = [
-        [InlineKeyboardButton("💳 Pay Now", callback_data="pay_now")],
+        # [InlineKeyboardButton("💳 Pay Now", callback_data="pay_now")],
         [InlineKeyboardButton("🗑️ Remove Item", callback_data="remove_item")]
     ]
     await update.message.reply_text(cart_text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
@@ -277,7 +277,7 @@ async def enter_quantity(update: Update, context: CallbackContext):
             user_cart[user_id].append({"name": product_name, "price": price, "quantity": quantity})
             logger.info(f"Added {quantity}x {product_name} to cart")
 
-        await update.message.reply_text(f"✅ Set {quantity}x {product_name} in cart!")
+        await update.message.reply_text(f"✅ Set {quantity}x {product_name} in cart!", reply_markup=get_main_menu())
     else:
         logger.error(f"Invalid product selection: category_id={category_id}, product_idx={product_idx}")
         await update.message.reply_text("❌ Invalid product selection.")
@@ -345,13 +345,13 @@ async def remove_product(update: Update, context: CallbackContext):
     if selected_item["quantity"] > 1:
         await update.message.reply_text(
             f"📝 You have {selected_item['quantity']}x {selected_item['name']} in your cart.\n"
-            "How many would you like to remove?"
+            "How many would you like to remove?",reply_markup=get_main_menu()
         )
         return REMOVE_QUANTITY  # Move to next step
 
     # If only 1, remove immediately
     removed_item = cart_items.pop(product_number)
-    await update.message.reply_text(f"🗑️ Removed {removed_item['name']} (1x) from cart.")
+    await update.message.reply_text(f"🗑️ Removed {removed_item['name']} (1x) from cart.",reply_markup=get_main_menu())
     await view_cart(update, context)
 
     return ConversationHandler.END  # End conversation
@@ -362,7 +362,7 @@ async def remove_quantity(update: Update, context: CallbackContext):
     item_index = context.user_data.get("remove_item_index")
 
     if item_index is None or item_index >= len(cart_items):
-        await update.message.reply_text("❌ Something went wrong. Please try again.")
+        await update.message.reply_text("❌ Something went wrong. Please try again.",reply_markup=get_main_menu())
         return ConversationHandler.END
 
     selected_item = cart_items[item_index]
@@ -370,7 +370,7 @@ async def remove_quantity(update: Update, context: CallbackContext):
 
     # Validate input
     if not remove_qty_text.isdigit() or int(remove_qty_text) <= 0:
-        await update.message.reply_text("❌ Please enter a valid quantity to remove.")
+        await update.message.reply_text("❌ Please enter a valid quantity to remove.",reply_markup=get_main_menu())
         return REMOVE_QUANTITY  # Ask again
 
     remove_qty = int(remove_qty_text)
@@ -754,7 +754,7 @@ async def view_cart(update: Update, context: CallbackContext):
 
     # Add "Pay Now" and "Remove Item" buttons
     keyboard = [
-        [InlineKeyboardButton("💳 Pay Now", callback_data="pay_now")],
+        # [InlineKeyboardButton("💳 Pay Now", callback_data="pay_now")],
         [InlineKeyboardButton("🗑️ Remove Item", callback_data="remove_item")]
     ]
     await update.message.reply_text(cart_text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
