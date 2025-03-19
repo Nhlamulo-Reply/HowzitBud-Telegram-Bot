@@ -34,7 +34,6 @@ user_position = {}
 user_orders = {}
 user_AFFILIATE_codes = {}
 first_time_users ={}
-user_wishlist = {}
 
 
 # AFFILIATE Codes Storage
@@ -60,7 +59,7 @@ def get_main_menu():
     return ReplyKeyboardMarkup(
         keyboard=[
             [KeyboardButton("🛍 Menu"), KeyboardButton("🛒 View Cart")],
-            [KeyboardButton("🔍 Search"),KeyboardButton("💳 Pay Now"), KeyboardButton("Track Order")],
+            [KeyboardButton("💳 Pay Now"), KeyboardButton("Track Order")],
             [KeyboardButton("ℹ About"), KeyboardButton("❓ Help"), KeyboardButton("📞 Support")]
         ], resize_keyboard=True
     )
@@ -92,8 +91,7 @@ def get_product_buttons(category_id, position=0):
         product_idx = idx + (current_chunk * chunk_size)
         buttons.append([
             InlineKeyboardButton(f"🛒 {product} - R{price}", callback_data=f"add_{category_id}_{product_idx}"),
-            InlineKeyboardButton("➕Quantity", callback_data=f"set_quantity_{category_id}_{product_idx}"),
-            InlineKeyboardButton("Wishlist", callback_data=f"wishlist_{category_id}_{product_idx}")
+            InlineKeyboardButton("➕ Set Quantity", callback_data=f"set_quantity_{category_id}_{product_idx}")
         ])
 
     nav_buttons = []
@@ -152,85 +150,15 @@ async def handle_start_button(update: Update, context: CallbackContext):
 async def show_menu(update: Update, context: CallbackContext):
     await update.message.reply_text("Select a category:", reply_markup=get_category_buttons())
 
-# Add search handler
-async def search_products(update: Update, context: CallbackContext):
-    await update.message.reply_text("Enter the name of the product you're looking for:")
-
-
-# Add wishlist handlers
-async def add_to_wishlist(update: Update, context: CallbackContext):
+# Category selected
+async def category_selected(update: Update, context: CallbackContext):
     query = update.callback_query
-    _, category_id, product_idx = query.data.split("_")
-    product_idx = int(product_idx)
+    category_id = query.data.split("_")[1]
+    await query.message.edit_text(f"Products in {db_categories[category_id]['name']}",
+                                  reply_markup=get_product_buttons(category_id))
 
-    category = db_categories.get(category_id, {})
-    products = list(category.get("products", {}).items())
-
-    if 0 <= product_idx < len(products):
-        product_name, price = products[product_idx]
-        user_id = query.from_user.id
-
-        if user_id not in user_wishlist:
-            user_wishlist[user_id] = []
-
-        if product_name not in [item["name"] for item in user_wishlist[user_id]]:
-            user_wishlist[user_id].append({"name": product_name, "price": price})
-            await query.answer(f"✅ Added {product_name} to wishlist!")
-        else:
-            await query.answer(f"❌ {product_name} is already in your wishlist.")
-    else:
-        await query.answer("❌ Invalid product selection.")
-
-async def view_wishlist(update: Update, context: CallbackContext):
-    user_id = update.message.from_user.id
-    wishlist_items = user_wishlist.get(user_id, [])
-
-    if not wishlist_items:
-        await update.message.reply_text("❤️ Your wishlist is empty.", reply_markup=get_main_menu())
-        return
-
-    wishlist_text = "❤️ *Your Wishlist:*\n"
-    for idx, item in enumerate(wishlist_items, start=1):
-        wishlist_text += f"{idx}. {item['name']} - R{item['price']}\n"
-
-    await update.message.reply_text(wishlist_text, parse_mode="Markdown", reply_markup=InlineKeyboardMarkup([
-        [InlineKeyboardButton("🛒 Add to Cart", callback_data="add_from_wishlist")],
-        [InlineKeyboardButton("🗑️ Remove Item", callback_data="remove_from_wishlist")]
-    ]))
-
-# async def handle_search(update: Update, context: CallbackContext):
-#     query = update.message.text.strip().lower()
-#     results = []
-#
-#     # Search for products
-#     for category_id, category in db_categories.items():
-#         for product, price in category["products"].items():
-#             if query in product.lower():
-#                 results.append((product, price, category_id))
-#
-#     if results:
-#         response = "🔍 *Search Results:*\n"
-#         for idx, (product, price, category_id) in enumerate(results, start=1):
-#             response += f"{idx}. {product} - R{price}\n"
-#
-#         # Add inline buttons for each product
-#         buttons = []
-#         for idx, (product, price, category_id) in enumerate(results, start=1):
-#             buttons.append([
-#                 InlineKeyboardButton(f"🛒 Add {product} to Cart", callback_data=f"add_{category_id}_{idx - 1}"),
-#                 InlineKeyboardButton(f"❤️ Add {product} to Wishlist", callback_data=f"wishlist_{category_id}_{idx - 1}")
-#             ])
-#             buttons.append([
-#                 InlineKeyboardButton(f"📝 Set Quantity for {product}", callback_data=f"set_quantity_{category_id}_{idx - 1}")
-#             ])
-#
-#         reply_markup = InlineKeyboardMarkup(buttons)
-#         await update.message.reply_text(response, reply_markup=reply_markup, parse_mode="Markdown")
-#     else:
-#         await update.message.reply_text("No products found.", reply_markup=get_main_menu())
-
-# Add to cart from search results
-async def add_to_cart_from_search(update: Update, context: CallbackContext):
+# Product selected
+async def product_selected(update: Update, context: CallbackContext):
     query = update.callback_query
     _, category_id, product_idx = query.data.split("_")
     product_idx = int(product_idx)
@@ -247,110 +175,17 @@ async def add_to_cart_from_search(update: Update, context: CallbackContext):
 
         # Default quantity to 1
         user_cart[user_id].append({"name": product_name, "price": price, "quantity": 1})
+
         await query.answer(f"✅ Added 1x {product_name} to cart!")
+
+        # Generate new reply markup
+        new_reply_markup = get_product_buttons(category_id, product_idx)
+
+        # Check if the new reply markup is different from the current one
+        if new_reply_markup != query.message.reply_markup:
+            await query.message.edit_reply_markup(reply_markup=new_reply_markup)
     else:
-        await query.answer("❌ Product not found.")
-
-# Add to wishlist from search results
-async def add_to_wishlist_from_search(update: Update, context: CallbackContext):
-    query = update.callback_query
-    _, category_id, product_idx = query.data.split("_")
-    product_idx = int(product_idx)
-
-    category = db_categories.get(category_id, {})
-    products = list(category.get("products", {}).items())
-
-    if 0 <= product_idx < len(products):
-        product_name, price = products[product_idx]
-        user_id = query.from_user.id
-
-        if user_id not in user_wishlist:
-            user_wishlist[user_id] = []
-
-        if product_name not in [item["name"] for item in user_wishlist[user_id]]:
-            user_wishlist[user_id].append({"name": product_name, "price": price})
-            await query.answer(f"✅ Added {product_name} to wishlist!")
-        else:
-            await query.answer(f"❌ {product_name} is already in your wishlist.")
-    else:
-        await query.answer("❌ Product not found.")
-
-# Set quantity from search results
-async def set_quantity_from_search(update: Update, context: CallbackContext):
-    query = update.callback_query
-    _, category_id, product_idx = query.data.split("_")
-    product_idx = int(product_idx)
-
-    category = db_categories.get(category_id, {})
-    products = list(category.get("products", {}).items())
-
-    if 0 <= product_idx < len(products):
-        product_name, _ = products[product_idx]
-        context.user_data["selected_product"] = (category_id, product_name)
-        context.user_data["awaiting_quantity"] = True
-        await query.answer()
-        await query.message.reply_text(f"📝 Enter the quantity for {product_name}:")
-        return ENTER_QUANTITY
-    else:
-        await query.answer("❌ Product not found.")
-
-async def handle_callback_query(update: Update, context: CallbackContext):
-    query = update.callback_query
-    try:
-        # Handle the callback query based on its data
-        if query.data.startswith("add_"):
-            await product_selected(update, context)
-        elif query.data.startswith("set_quantity_"):
-            await set_quantity(update, context)
-        elif query.data.startswith("wishlist_"):
-            await add_to_wishlist(update, context)
-        else:
-            await query.answer("❌ Invalid action.")
-    except Exception as e:
-        logger.error(f"Error handling callback query: {e}")
-        await query.answer("❌ An error occurred. Please try again.")
-
-
-# Category selected
-async def category_selected(update: Update, context: CallbackContext):
-    query = update.callback_query
-    category_id = query.data.split("_")[1]
-    await query.message.edit_text(f"Products in {db_categories[category_id]['name']}",
-                                  reply_markup=get_product_buttons(category_id))
-
-# Product selected
-async def product_selected(update: Update, context: CallbackContext):
-    query = update.callback_query
-    try:
-        _, category_id, product_idx = query.data.split("_")
-        product_idx = int(product_idx)
-
-        category = db_categories.get(category_id, {})
-        products = list(category.get("products", {}).items())
-
-        if 0 <= product_idx < len(products):
-            product_name, price = products[product_idx]
-            user_id = query.from_user.id
-
-            if user_id not in user_cart:
-                user_cart[user_id] = []
-
-            # Default quantity to 1
-            user_cart[user_id].append({"name": product_name, "price": price, "quantity": 1})
-
-            await query.answer(f"✅ Added 1x {product_name} to cart!")
-
-            # Generate new reply markup
-            new_reply_markup = get_product_buttons(category_id, product_idx)
-
-            # Check if the new reply markup is different from the current one
-            if new_reply_markup != query.message.reply_markup:
-                await query.message.edit_reply_markup(reply_markup=new_reply_markup)
-        else:
-            await query.answer("❌ Invalid product selection.")
-    except ValueError as e:
-        logger.error(f"Error parsing callback data: {e}")
-        await query.answer("❌ An error occurred. Please try again.")
+        await query.answer("❌ Invalid product selection.")
 
 # View cart
 async def view_cart(update: Update, context: CallbackContext):
@@ -605,7 +440,7 @@ async def confirm_shipping(update: Update, context: CallbackContext):
             "phone": context.user_data["phone"],
             "address": context.user_data["address"],
             "city": context.user_data["city"],
-            "Province": context.user_data["country"]
+            "country": context.user_data["country"]
         }
 
         await update.message.reply_text("✅ Your shipping details have been saved!")
@@ -616,15 +451,16 @@ async def confirm_shipping(update: Update, context: CallbackContext):
             await update.message.reply_text("🛒 Your cart is empty. Add items to proceed to payment.", reply_markup=get_main_menu())
             return ConversationHandler.END
 
-        # Transition to the payment conversation
-        await start_payment(update, context)
-        return ConversationHandler.END  # End the shipping conversation
+        # Ask if the user has a discount code
+        await update.message.reply_text("Do you have a discount code? (yes/no)")
+        return DISCOUNT_CODE  # Move to discount code step
     elif user_response == "no":
         await update.message.reply_text("Please re-enter your shipping details.")
         return FULL_NAME  # Restart the shipping process
     else:
         await update.message.reply_text("Invalid input. Please type 'yes' or 'no'.")
         return CONFIRM  # Stay in the CONFIRM state
+
 async def cancel_shipping(update: Update, context: CallbackContext):
     await update.message.reply_text("Shipping process canceled. Returning to the main menu.", reply_markup=get_main_menu())
     return ConversationHandler.END
@@ -635,43 +471,51 @@ async def cancel_shipping(update: Update, context: CallbackContext):
 # Payment conversation
 async def start_payment(update: Update, context: CallbackContext):
     logger.info("start_payment triggered")
-    user_id = update.message.from_user.id
-    context.user_data["user_id"] = user_id
 
-    # Reset the conversation state if the user clicks "Pay Now" again
-    if "awaiting_payment_confirmation" in context.user_data:
-        del context.user_data["awaiting_payment_confirmation"]
+    # Determine if the update is from a callback query or a message
+    # if update.callback_query:
+    #     user_id = update.callback_query.from_user.id
+    #     logger.info("Triggered by inline keyboard button")
+    # else:
+    user_id = update.message.from_user.id
+    logger.info("Triggered by reply keyboard button")
+
+    context.user_data["user_id"] = user_id
 
     # Check if the cart is empty
     cart_items = user_cart.get(user_id, [])
     if not cart_items:
-        logger.warning("User cart is empty")
-        await update.message.reply_text("🛒 Your cart is empty. Add items to proceed to payment.")
-        return ConversationHandler.END
+        if update.callback_query:
+            await update.callback_query.message.reply_text("🛒 Your cart is empty. Add items to proceed to payment.")
+        else:
+            await update.message.reply_text("🛒 Your cart is empty. Add items to proceed to payment.")
+        return
 
     # Check if shipping details are saved
     user_data = user_orders.get(user_id, {})
     if not user_data.get("address") or not user_data.get("full_name"):
-        logger.warning("Shipping details not found")
+        # if update.callback_query:
+        #     await update.callback_query.message.reply_text(
+        #         "🚚 Please provide your shipping details before proceeding to payment.\n"
+        #         "Use /shipping to provide your details.",
+        #         reply_markup=get_main_menu()
+        #     )
+        # else:
         await update.message.reply_text(
             "🚚 Please provide your shipping details before proceeding to payment.\n"
             "Use /shipping to provide your details.",
             reply_markup=get_main_menu()
         )
-        return ConversationHandler.END
+        return
 
     # Ask if the user has a discount code
-    logger.info("Asking for discount code")
+    # if update.callback_query:
+    #     await update.callback_query.message.reply_text("Do you have a discount code? (yes/no)")
+    # else:
     await update.message.reply_text("Do you have a discount code? (yes/no)")
-    return DISCOUNT_CODE
-
-# Add a fallback for invalid inputs
-async def fallback_invalid_input(update: Update, context: CallbackContext):
-    await update.message.reply_text("Invalid input. Please type 'yes' or 'no'.")
     return DISCOUNT_CODE
 async def handle_discount_code(update: Update, context: CallbackContext):
     user_response = update.message.text.strip().lower()
-    logger.info(f"User response to discount code prompt: {user_response}")
 
     if user_response == "yes":
         await update.message.reply_text("Please enter your discount code:")
@@ -692,7 +536,7 @@ async def apply_AFFILIATE_code(update: Update, context: CallbackContext):
         expiry = AFFILIATE_codes[AFFILIATE_code]["expiry"]
         if datetime.now() < expiry:
             user_AFFILIATE_codes[user_id] = AFFILIATE_code
-            await update.message.reply_text(f"🎉 Promo code applied! You get a 10% discount.")
+            await update.message.reply_text(f"Discount code '{AFFILIATE_code}' applied. You will receive a 10% discount!")
             await show_payment_methods(update, context)
             return PAYMENT_METHOD
         else:
@@ -886,10 +730,7 @@ async def about(update: Update, context: CallbackContext):
 
 # Support command
 async def support(update: Update, context: CallbackContext):
-    await update.message.reply_text(
-        "📞 Contact our support team at support@example.com or visit our FAQ page: https://example.com/faq",
-        reply_markup=get_main_menu()
-    )
+    await update.message.reply_text("Contact support at support@example.com.")
 
 # Track order
 async def track_order(update: Update, context: CallbackContext):
@@ -944,9 +785,11 @@ shipping_conversation = ConversationHandler(
     fallbacks=[CommandHandler("cancel", cancel_shipping)],
 )
 
+# Payment Conversation Handler
 payment_conv_handler = ConversationHandler(
     entry_points=[
-        MessageHandler(filters.TEXT & filters.Regex("^💳 Pay Now$"), start_payment)
+        CallbackQueryHandler(start_payment, pattern="^pay_now$"),  # For inline keyboard button
+        MessageHandler(filters.TEXT & filters.Regex("^💳 Pay Now$"), start_payment)  # For reply keyboard button
     ],
     states={
         DISCOUNT_CODE: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_discount_code)],
@@ -1010,15 +853,6 @@ application.add_handler(MessageHandler(filters.TEXT & filters.Regex("^💳 Pay N
 application.add_handler(CallbackQueryHandler(back_to_categories, pattern="^back_to_categories$"))
 application.add_handler(CallbackQueryHandler(back_to_menu, pattern="^back_to_menu$"))
 application.add_handler(CallbackQueryHandler(product_navigation, pattern="^(next|back)_.*"))
-
-# Add Search handlers to the application
-# application.add_handler(MessageHandler(filters.TEXT & filters.Regex("^🔍 Search$"), handle_search))
-
-application.add_handler(CallbackQueryHandler(add_to_cart_from_search, pattern="^add_search_.*"))
-application.add_handler(CallbackQueryHandler(add_to_wishlist_from_search, pattern="^wishlist_search_.*"))
-application.add_handler(CallbackQueryHandler(set_quantity_from_search, pattern="^set_quantity_search_.*"))
-# Add the callback query handler to the application
-application.add_handler(CallbackQueryHandler(handle_callback_query))
 
 # Start the bot
 if __name__ == "__main__":
